@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
-# 设置代理环境变量
-os.environ['HTTP_PROXY'] = 'socks5://127.0.0.1:10808'
-os.environ['HTTPS_PROXY'] = 'socks5://127.0.0.1:10808'
-os.environ['ALL_PROXY'] = 'socks5://127.0.0.1:10808'
+# 设置代理环境变量（与funding_rate_strategy.py一致）
+os.environ['HTTP_PROXY'] = 'http://127.0.0.1:10808'
+os.environ['HTTPS_PROXY'] = 'https://127.0.0.1:10808'
+os.environ['ALL_PROXY'] = 'http://127.0.0.1:10808'
 
 # 币安API设置
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
@@ -18,8 +18,8 @@ PROXY_ENABLED = True  # 设置为False可以禁用代理
 PROXY_HOST = '127.0.0.1'
 PROXY_PORT = 10808
 PROXY_CONFIG = {
-    'http': f'socks5://{PROXY_HOST}:{PROXY_PORT}',
-    'https': f'socks5://{PROXY_HOST}:{PROXY_PORT}'
+    'http': f'http://{PROXY_HOST}:{PROXY_PORT}',
+    'https': f'https://{PROXY_HOST}:{PROXY_PORT}'
 } if PROXY_ENABLED else None
 
 # 应用设置
