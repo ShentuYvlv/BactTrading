@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingView Lightweight Charts</title>
+    <!-- 使用最新版本的库，添加crossorigin属性 -->
+    <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js" crossorigin="anonymous"></script>
+    <script>
+        // 检查库是否加载成功
+        window.onload = function() {
+            if (typeof LightweightCharts !== 'undefined') {
+                console.log('Lightweight Charts 库加载成功!');
+            } else {
+                console.error('Lightweight Charts 库加载失败!');
+            }
+        };
+    </script>
+</head>
+<body>
+    <!-- 这个文件仅用于加载TradingView Lightweight Charts库 -->
+    <div id="library-status"></div>
+</body>
+</html> 
