@@ -84,7 +84,7 @@ def initialize_exchange():
     
     return exchange
 
-def fetch_ohlcv_data(exchange, symbol='BTC/USDT:USDT', timeframe='1h', limit=200):
+def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', limit=200):
     """获取K线历史数据"""
     try:
         logger.info(f"获取 {symbol} 的 {timeframe} K线数据, 数量: {limit}...")
@@ -101,8 +101,8 @@ def fetch_ohlcv_data(exchange, symbol='BTC/USDT:USDT', timeframe='1h', limit=200
             if symbol not in exchange.markets:
                 available_symbols = [s for s in exchange.markets.keys() if 'USDT' in s][:10]
                 logger.warning(f"交易对 {symbol} 不存在! 可用的USDT交易对示例: {available_symbols}")
-                # 尝试使用BTC/USDT作为备选
-                symbol = 'BTC/USDT:USDT'
+                # 尝试使用NXPC/USDT作为备选
+                symbol = 'NXPC/USDT:USDT'
                 logger.info(f"使用备选交易对: {symbol}")
         except Exception as e:
             logger.error(f"加载市场数据失败: {str(e)}")
@@ -223,7 +223,7 @@ def prepare_data_for_chart(df):
         'histogram': histogram_data
     }
 
-def fetch_trades(exchange, symbol='BTC/USDT:USDT', since=None, until=None, limit=100):
+def fetch_trades(exchange, symbol='NXPC/USDT:USDT', since=None, until=None, limit=100):
     """获取个人交易记录，支持时间范围过滤"""
     try:
         # 检查是否有API密钥
@@ -384,7 +384,7 @@ def create_app():
                                 dcc.Input(
                                     id="symbol-input",
                                     type="text",
-                                    value="BTC/USDT:USDT",
+                                    value="NXPC/USDT:USDT",
                                     className="form-control"
                                 )
                             ], width=3),
@@ -420,7 +420,7 @@ def create_app():
                                     display_format="YYYY-MM-DD",
                                     className="w-100"
                                 )
-                            ], width=2, id="start-date-col", style={"display": "none"}),
+                            ], width=2, id="start-date-col", style={"display": "true"}),
                             
                             dbc.Col([
                                 html.Label("结束日期"),
@@ -430,7 +430,7 @@ def create_app():
                                     display_format="YYYY-MM-DD",
                                     className="w-100"
                                 )
-                            ], width=2, id="end-date-col", style={"display": "none"}),
+                            ], width=2, id="end-date-col", style={"display": "true"}),
                             
                             # 加载按钮
                             dbc.Col([
