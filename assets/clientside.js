@@ -10,6 +10,39 @@ if (!window.dash_clientside) {
 // 辅助函数 - 数字补零
 const pad = (n) => n < 10 ? '0' + n : n;
 
+// 修正时间戳函数，处理可能的时区或时间偏移问题
+const correctTimestamp = (timestamp) => {
+    // 如果传入的是秒为单位的时间戳，转换为毫秒
+    if (timestamp < 10000000000) {
+        timestamp = timestamp * 1000;
+    }
+    
+    // 这里不再添加16小时的修正，直接返回正确的时间戳
+    return timestamp;
+};
+
+// 格式化日期时间，转换为正确的时间
+const formatBeijingTime = (timestamp) => {
+    // 修正时间戳
+    const correctedTimestamp = correctTimestamp(timestamp);
+    
+    // 创建日期对象
+    const date = new Date(correctedTimestamp);
+    
+    // 调整时间：减去10个小时
+    const adjustedDate = new Date(date.getTime() - (1 * 60 * 60 * 1000-1));
+    
+    // 格式化日期和时间
+    const formattedDate = `${adjustedDate.getFullYear()}-${pad(adjustedDate.getMonth() + 1)}-${pad(adjustedDate.getDate())}`;
+    const formattedTime = `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`;
+    
+    return { 
+        date: formattedDate, 
+        time: formattedTime, 
+        full: `${formattedDate} ${formattedTime}`
+    };
+};
+
 // 创建图表图例
 const createLegend = (chart, container, items) => {
     const legendContainer = document.createElement('div');
@@ -64,6 +97,41 @@ const addChartInteractions = (chartInstance, containerElement, isMainChart = fal
     // 鼠标滚轮事件 - 缩放图表
     containerElement.addEventListener('wheel', (e) => {
         e.preventDefault(); // 阻止页面滚动
+        
+        // 获取鼠标位置相对于容器的坐标
+        const rect = containerElement.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        
+        // 检查鼠标是否在价格轴上 (假设价格轴在右侧，宽度约为50px)
+        const isPriceAxisArea = mouseX > rect.width - 50;
+        
+        if (isPriceAxisArea) {
+            // 鼠标在价格轴上，控制价格缩放
+            const delta = e.deltaY;
+            const priceScale = chartInstance.priceScale('right');
+            
+            if (priceScale) {
+                // 获取当前的价格范围
+                const currentRange = priceScale.priceRange();
+                if (!currentRange) return;
+                
+                // 计算新的价格范围
+                let newRange;
+                if (delta < 0) {
+                    // 放大 - 缩小范围
+                    newRange = currentRange.multiply(0.9);
+                } else {
+                    // 缩小 - 扩大范围
+                    newRange = currentRange.multiply(1.1);
+                }
+                
+                // 应用新的价格范围
+                priceScale.applyOptions({
+                    autoScale: false,
+                });
+                priceScale.setPriceRange(newRange);
+            }
+        }
     }, { passive: false });
 
     // 添加双击重置功能
@@ -88,6 +156,49 @@ const addChartInteractions = (chartInstance, containerElement, isMainChart = fal
         } else {
             // 双击图表主体，重置时间范围
             chartInstance.timeScale().fitContent();
+        }
+    });
+    
+    // 创建时间标签元素
+    const timeLabel = document.createElement('div');
+    timeLabel.className = 'time-label';
+    Object.assign(timeLabel.style, {
+        position: 'absolute',
+        bottom: '25px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        backgroundColor: 'rgba(33, 56, 77, 0.8)',
+        color: 'white',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        fontSize: '12px',
+        fontFamily: 'sans-serif',
+        pointerEvents: 'none',
+        zIndex: 5,
+        opacity: 0,
+        transition: 'opacity 0.2s ease'
+    });
+    containerElement.appendChild(timeLabel);
+    
+    // 订阅十字线移动事件
+    chartInstance.subscribeCrosshairMove((param) => {
+        if (param && param.time) {
+            // 使用新的格式化函数处理时间
+            const timeInfo = formatBeijingTime(param.time);
+            
+            // 更新标签内容
+            timeLabel.textContent = `${timeInfo.full}`;
+            timeLabel.style.opacity = '1';
+            
+            // 获取鼠标位置
+            if (param.point) {
+                // 将标签放在十字线下方
+                timeLabel.style.left = `${param.point.x}px`;
+                timeLabel.style.transform = 'translateX(-50%)';
+            }
+        } else {
+            // 鼠标离开图表区域，隐藏标签
+            timeLabel.style.opacity = '0';
         }
     });
 };
@@ -170,6 +281,12 @@ const addGlobalStyles = () => {
             z-index: 1000;
             pointer-events: none;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        
+        /* 时间标签样式 */
+        .time-label {
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            white-space: nowrap;
         }
     `;
     document.head.appendChild(style);
@@ -538,30 +655,34 @@ window.dash_clientside.clientside = {
                 timeVisible: true,
                 secondsVisible: false,
                 tickMarkFormatter: (time, tickMarkType, locale) => {
-                    const date = new Date(time * 1000);
+                    // 使用修正的时间戳
+                    const timestamp = correctTimestamp(time);
+                    const date = new Date(timestamp);
                     
-                    // 使用 LightweightCharts 提供的 TickMarkType 来决定格式
-                    // TickMarkType: Year = 0, Month = 1, Day = 2, Hour = 3, Minute = 4, Second = 5
+                    // 调整时间：减去10个小时
+                    const adjustedDate = new Date(date.getTime() - 10 * 60 * 60 * 1000);
+                    
+                    // 使用调整后的时间来决定格式
                     switch (tickMarkType) {
                         case LightweightCharts.TickMarkType.Year:
-                            return date.getFullYear().toString();
+                            return adjustedDate.getFullYear().toString();
                         case LightweightCharts.TickMarkType.Month:
                             // 使用Intl API来获取本地化的月份名称缩写
-                            return new Intl.DateTimeFormat(locale, { month: 'short' }).format(date);
+                            return new Intl.DateTimeFormat(locale, { month: 'short' }).format(adjustedDate);
                         case LightweightCharts.TickMarkType.Day:
-                            return pad(date.getDate());
+                            return pad(adjustedDate.getDate());
                         case LightweightCharts.TickMarkType.Hour:
                             // 每4小时标记一个小时文本，其他小时留空或显示更简略标记
-                            if (date.getHours() % 4 === 0) {
-                                return `${pad(date.getHours())}:00`;
+                            if (adjustedDate.getHours() % 4 === 0) {
+                                return `${pad(adjustedDate.getHours())}:00`;
                             }
                             return ''; // 其他小时不显示，避免过于密集
                         case LightweightCharts.TickMarkType.Minute:
                             // 只有在非常非常放大的情况下才会显示分钟
-                    return `${pad(date.getHours())}:${pad(date.getMinutes())}`; 
+                    return `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`; 
                         default:
                             // 对于更细的粒度或未知类型，可以显示HH:MM
-                            return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+                            return `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`;
                     }
                 },
                 // 统一时间轴配置，确保所有图表使用相同设置
@@ -1504,27 +1625,89 @@ window.dash_clientside.clientside = {
                         ? Math.floor(trade.time / 1000) 
                         : trade.time;
                     
-                    // 创建带有ID的标记，以便后续可以识别
-                    const tradeId = `trade-${tradeTime}-${trade.side}-${Math.random().toString(36).substr(2, 5)}`;
+                    // 判断是开仓还是平仓
+                    const isOpen = trade.position_type === 'open';
+                    const isClose = trade.position_type === 'close';
                     
-                    // 创建简单的箭头标记
+                    // 创建带有ID的标记，以便后续可以识别
+                    const tradeId = `trade-${tradeTime}-${trade.side}-${trade.position_id || Math.random().toString(36).substr(2, 5)}`;
+                    
+                    // 为不同类型的交易设置不同的样式
+                    let markerShape = 'circle';
+                    let markerColor = '#26a69a';  // 默认颜色
+                    let markerSize = 3;
+                    let markerPosition = 'belowBar';
+                    let markerText = '';
+                    
+                    if (isOpen) {
+                        // 开仓标记
+                        markerShape = trade.side === 'buy' ? 'arrowUp' : 'arrowDown';
+                        markerColor = trade.side === 'buy' ? '#26a69a' : '#ef5350';
+                        markerText = trade.side === 'buy' ? '多' : '空';
+                        markerPosition = trade.side === 'buy' ? 'belowBar' : 'aboveBar';
+                        markerSize = 4;
+                    } else if (isClose) {
+                        // 平仓标记
+                        markerShape = trade.side === 'sell' ? 'circle' : 'circle';
+                        
+                        // 根据利润设置颜色
+                        if (trade.profit !== undefined) {
+                            markerColor = trade.profit >= 0 ? '#26a69a' : '#ef5350';
+                        } else {
+                            markerColor = trade.side === 'sell' ? '#26a69a' : '#ef5350';
+                        }
+                        
+                        markerText = trade.profit >= 0 ? '盈' : '亏';
+                        markerPosition = trade.side === 'sell' ? 'aboveBar' : 'belowBar';
+                        markerSize = 4;
+                    } else {
+                        // 常规交易标记
+                        markerShape = trade.side === 'buy' ? 'arrowUp' : 'arrowDown';
+                        markerColor = trade.side === 'buy' ? '#26a69a' : '#ef5350';
+                        markerPosition = trade.side === 'buy' ? 'belowBar' : 'aboveBar';
+                        markerText = trade.side === 'buy' ? '买' : '卖';
+                    }
+                    
+                    // 创建标记
                     const marker = {
                         time: tradeTime,
-                        position: trade.side === 'buy' ? 'belowBar' : 'aboveBar', // 买入标记在下方，卖出标记在上方
-                        color: trade.side === 'buy' ? '#26a69a' : '#ef5350',
-                        shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-                        size: 3, // 增大标记大小，提高可点击/悬停区域
-                        text: trade.side === 'buy' ? '买' : '卖', // 添加简短文本标识
+                        position: markerPosition,
+                        color: markerColor,
+                        shape: markerShape,
+                        size: markerSize,
+                        text: markerText,
                         id: tradeId // 添加ID以便后续识别
                     };
                     
+                    // 将时间戳转换为北京时间
+                    const formatBeijingTime = (timestamp) => {
+                        const date = new Date(timestamp * 1000);
+                        
+                        // 获取UTC时间并加上8小时得到北京时间
+                        const beijingDate = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+                        
+                        // 格式化为年-月-日 时:分:秒
+                        const year = beijingDate.getUTCFullYear();
+                        const month = (beijingDate.getUTCMonth() + 1).toString().padStart(2, '0');
+                        const day = beijingDate.getUTCDate().toString().padStart(2, '0');
+                        const hours = beijingDate.getUTCHours().toString().padStart(2, '0');
+                        const minutes = beijingDate.getUTCMinutes().toString().padStart(2, '0');
+                        const seconds = beijingDate.getUTCSeconds().toString().padStart(2, '0');
+                        
+                        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} (北京时间)`;
+                    };
+                    
                     // 存储交易详情
+                    const tradeTime_formatted = formatBeijingTime(tradeTime);
+                    
                     tradeDetailsMap[tradeId] = {
-                        time: new Date(tradeTime * 1000).toLocaleString(),
-                        price: trade.price,
+                        time: tradeTime_formatted,
+                        price: trade.price.toFixed(4),
                         side: trade.side === 'buy' ? '买入' : '卖出',
                         amount: trade.amount || 0,
                         cost: trade.cost || (trade.price * (trade.amount || 0)),
+                        type: isOpen ? '开仓' : (isClose ? '平仓' : '交易'),
+                        position_id: trade.position_id || '',
                         ...trade // 保存原始交易数据的所有字段
                     };
                     
@@ -1559,14 +1742,26 @@ window.dash_clientside.clientside = {
                         if (hoveredId && hoveredId.startsWith('trade-') && tradeDetailsMap[hoveredId]) {
                             const tradeDetails = tradeDetailsMap[hoveredId];
                             
-                            // 更新提示框内容
-                            tradeTooltip.innerHTML = `
+                            // 根据交易类型构建不同的提示内容
+                            let tooltipContent = `
                                 <div><strong>时间:</strong> ${tradeDetails.time}</div>
+                                <div><strong>类型:</strong> ${tradeDetails.type}</div>
                                 <div><strong>方向:</strong> ${tradeDetails.side}</div>
                                 <div><strong>价格:</strong> ${tradeDetails.price}</div>
-                                <div><strong>数量:</strong> ${tradeDetails.amount}</div>
-                                <div><strong>价值:</strong> ${tradeDetails.cost}</div>
+                                <div><strong>数量:</strong> ${tradeDetails.amount.toFixed(4)}</div>
+                                <div><strong>价值:</strong> ${tradeDetails.cost.toFixed(4)}</div>
                             `;
+                            
+                            // 如果是平仓，添加盈亏信息
+                            if (tradeDetails.type === '平仓' && tradeDetails.profit !== undefined) {
+                                tooltipContent += `
+                                    <div><strong>盈亏:</strong> <span style="color:${tradeDetails.profit >= 0 ? '#26a69a' : '#ef5350'}">${tradeDetails.profit.toFixed(4)}</span></div>
+                                    <div><strong>盈亏率:</strong> <span style="color:${tradeDetails.profit_percent >= 0 ? '#26a69a' : '#ef5350'}">${tradeDetails.profit_percent.toFixed(2)}%</span></div>
+                                `;
+                            }
+                            
+                            // 更新提示框内容
+                            tradeTooltip.innerHTML = tooltipContent;
                             
                             // 定位提示框
                             if (param.point) {
