@@ -175,6 +175,64 @@ const addGlobalStyles = () => {
     document.head.appendChild(style);
 };
 
+// 创建全屏按钮函数
+const createFullscreenButton = (container) => {
+    // 检查是否已经有全屏按钮
+    if (container.querySelector('.fullscreen-button')) {
+        return container.querySelector('.fullscreen-button');
+    }
+    
+    // 创建全屏按钮
+    const fullscreenBtn = document.createElement('div');
+    fullscreenBtn.className = 'fullscreen-button';
+    fullscreenBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>';
+    
+    // 设置按钮样式
+    Object.assign(fullscreenBtn.style, {
+        position: 'absolute',
+        right: '10px',
+        top: '10px',
+        width: '28px',
+        height: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(33, 56, 77, 0.6)',
+        color: 'white',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        zIndex: 10,
+        transition: 'background-color 0.2s ease',
+    });
+    
+    // 添加全屏切换功能
+    fullscreenBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+            // 进入全屏
+            if (container.requestFullscreen) {
+                container.requestFullscreen();
+            } else if (container.webkitRequestFullscreen) {
+                container.webkitRequestFullscreen();
+            } else if (container.msRequestFullscreen) {
+                container.msRequestFullscreen();
+            }
+        } else {
+            // 退出全屏
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        }
+    });
+    
+    // 添加到容器
+    container.appendChild(fullscreenBtn);
+    return fullscreenBtn;
+};
+
 // 初始化客户端命名空间
 window.dash_clientside.clientside = {
     /**
@@ -291,6 +349,32 @@ window.dash_clientside.clientside = {
         container.appendChild(chartContainer);
         container.appendChild(dividerContainer);
         container.appendChild(volumeContainer);
+        
+        // 为RSI和MACD创建额外的容器（如果需要）
+        let rsiContainer = null;
+        let macdContainer = null;
+        
+        if (showRsi) {
+            rsiContainer = document.createElement('div');
+            rsiContainer.style.width = '100%';
+            rsiContainer.style.height = '150px';
+            rsiContainer.style.position = 'relative';
+            rsiContainer.style.marginTop = '10px';
+            
+            // 添加RSI容器到主容器
+            container.appendChild(rsiContainer);
+        }
+        
+        if (showMacd) {
+            macdContainer = document.createElement('div');
+            macdContainer.style.width = '100%';
+            macdContainer.style.height = '150px';
+            macdContainer.style.position = 'relative';
+            macdContainer.style.marginTop = '10px';
+            
+            // 添加MACD容器到主容器
+            container.appendChild(macdContainer);
+        }
         
         // 默认的高度比例
         let chartRatio = 0.7;
@@ -631,6 +715,241 @@ window.dash_clientside.clientside = {
         });
         volumeSeries.setData(volumeData);
         
+        // 添加EMA指标
+        let emaSeries = null;
+        if (showEma && chartData.ema20 && chartData.ema20.length > 0) {
+            console.log('添加EMA指标...');
+            emaSeries = priceChart.addLineSeries({
+                color: '#f48fb1',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                title: 'EMA20',
+            });
+            emaSeries.setData(chartData.ema20);
+        }
+        
+        // 添加布林带
+        let upperBandSeries = null;
+        let middleBandSeries = null;
+        let lowerBandSeries = null;
+        
+        if (showBollinger && chartData.upper_band && chartData.middle_band && chartData.lower_band) {
+            console.log('添加布林带...');
+            
+            // 上轨
+            upperBandSeries = priceChart.addLineSeries({
+                color: '#90caf9',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                title: '上轨',
+            });
+            upperBandSeries.setData(chartData.upper_band);
+            
+            // 中轨 (SMA20)
+            middleBandSeries = priceChart.addLineSeries({
+                color: '#64b5f6',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                title: '中轨',
+            });
+            middleBandSeries.setData(chartData.middle_band);
+            
+            // 下轨
+            lowerBandSeries = priceChart.addLineSeries({
+                color: '#90caf9',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                title: '下轨',
+            });
+            lowerBandSeries.setData(chartData.lower_band);
+        }
+        
+        // 创建RSI图表
+        let rsiSeries = null;
+        
+        if (showRsi && rsiContainer && chartData.rsi && chartData.rsi.length > 0) {
+            console.log('添加RSI指标...');
+            
+            rsiChart = LightweightCharts.createChart(rsiContainer, {
+                ...commonChartOptions,
+                height: 150,
+                timeScale: {
+                    ...commonChartOptions.timeScale,
+                    visible: true,
+                },
+                rightPriceScale: {
+                    ...commonChartOptions.rightPriceScale,
+                    scaleMargins: {
+                        top: 0.1,
+                        bottom: 0.1,
+                    },
+                },
+                layout: {
+                    ...commonChartOptions.layout,
+                    background: { color: '#151924' },
+                    textColor: '#d1d4dc',
+                },
+                grid: {
+                    ...commonChartOptions.grid,
+                    horzLines: {
+                        color: '#2B2B43',
+                        style: LightweightCharts.LineStyle.Dotted,
+                        visible: true,
+                    },
+                },
+            });
+            
+            // 添加RSI线
+            rsiSeries = rsiChart.addLineSeries({
+                color: '#7b1fa2',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                title: 'RSI(14)',
+            });
+            rsiSeries.setData(chartData.rsi);
+            
+            // 添加超买超卖参考线
+            const rsiOverbought = rsiChart.addLineSeries({
+                color: '#ef5350',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            });
+            
+            const rsiOversold = rsiChart.addLineSeries({
+                color: '#26a69a',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            });
+            
+            // 设置超买超卖线的数据
+            const rsiPeriod = chartData.rsi.map(point => ({
+                time: point.time,
+                value: 70, // 超买线
+            }));
+            
+            const rsiOversoldData = chartData.rsi.map(point => ({
+                time: point.time,
+                value: 30, // 超卖线
+            }));
+            
+            rsiOverbought.setData(rsiPeriod);
+            rsiOversold.setData(rsiOversoldData);
+            
+            // 添加RSI指标到allCharts数组
+            allCharts.push(rsiChart);
+        }
+        
+        // 创建MACD图表
+        let macdLineSeries = null;
+        let signalLineSeries = null;
+        let histogramSeries = null;
+        
+        if (showMacd && macdContainer && chartData.macd && chartData.signal && chartData.histogram) {
+            console.log('添加MACD指标...');
+            
+            macdChart = LightweightCharts.createChart(macdContainer, {
+                ...commonChartOptions,
+                height: 150,
+                timeScale: {
+                    ...commonChartOptions.timeScale,
+                    visible: true,
+                },
+                rightPriceScale: {
+                    ...commonChartOptions.rightPriceScale,
+                    scaleMargins: {
+                        top: 0.1,
+                        bottom: 0.1,
+                    },
+                },
+                layout: {
+                    ...commonChartOptions.layout,
+                    background: { color: '#151924' },
+                    textColor: '#d1d4dc',
+                },
+                grid: {
+                    ...commonChartOptions.grid,
+                    horzLines: {
+                        color: '#2B2B43',
+                        style: LightweightCharts.LineStyle.Dotted,
+                        visible: true,
+                    },
+                },
+            });
+            
+            // 添加MACD线
+            macdLineSeries = macdChart.addLineSeries({
+                color: '#2196F3',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                title: 'MACD',
+            });
+            macdLineSeries.setData(chartData.macd);
+            
+            // 添加信号线
+            signalLineSeries = macdChart.addLineSeries({
+                color: '#FF9800',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                title: '信号线',
+            });
+            signalLineSeries.setData(chartData.signal);
+            
+            // 添加直方图
+            histogramSeries = macdChart.addHistogramSeries({
+                color: '#26a69a',
+                priceFormat: {
+                    type: 'price',
+                    precision: 6,
+                },
+                priceLineVisible: false,
+                lastValueVisible: false,
+                title: '直方图',
+            });
+            
+            // 为直方图添加颜色
+            const histogramData = chartData.histogram.map(item => ({
+                time: item.time,
+                value: item.value,
+                color: item.value >= 0 ? '#26a69a' : '#ef5350',
+            }));
+            
+            histogramSeries.setData(histogramData);
+            
+            // 添加零线
+            const zeroLine = macdChart.addLineSeries({
+                color: '#9e9e9e',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            });
+            
+            // 设置零线数据
+            const zeroLineData = chartData.macd.map(point => ({
+                time: point.time,
+                value: 0,
+            }));
+            
+            zeroLine.setData(zeroLineData);
+            
+            // 添加MACD指标到allCharts数组
+            allCharts.push(macdChart);
+        }
+        
         // 通用同步函数 - 完全重写以确保更紧密的同步
         const syncTimeScale = (sourceChart, targetCharts) => {
             const sourceTimeScale = sourceChart.timeScale();
@@ -639,18 +958,21 @@ window.dash_clientside.clientside = {
             const handler = sourceTimeScale.subscribeVisibleTimeRangeChange(() => {
                 // 立即同步所有图表，不使用防抖或节流
                 try {
-                    // 获取源图表的可见范围和缩放级别
+                    // 获取源图表的可见范围和选项
                     const timeRange = sourceTimeScale.getVisibleRange();
-                    const barSpacing = sourceTimeScale.barSpacing();
+                    const options = sourceTimeScale.options();
                     
-                    if (timeRange && barSpacing) {
+                    if (timeRange && options) {
                         // 同步所有目标图表
                         targetCharts.forEach(targetChart => {
                             if (targetChart !== sourceChart) {
-                                // 保持完全相同的缩放级别和可见范围
-                                // 注意：顺序很重要 - 先设置bar spacing再设置可见范围
-                                targetChart.timeScale().setBarSpacing(barSpacing);
+                                try {
+                                    // 保持完全相同的选项和可见范围
+                                    targetChart.timeScale().applyOptions(options);
                                 targetChart.timeScale().setVisibleRange(timeRange);
+                                } catch (err) {
+                                    console.error('同步图表选项失败:', err);
+                                }
                             }
                         });
                     }
@@ -772,32 +1094,23 @@ window.dash_clientside.clientside = {
             if (macdChart && !allCharts.includes(macdChart)) {
                 allCharts.push(macdChart);
             }
-            
-            // 严格的单向同步 - 只从主图表同步到辅助图表
-            // 禁用从辅助图表到主图表的同步，以避免循环
-            const mainTimeScaleHandler = syncTimeScale(priceChart, 
-                allCharts.filter(c => c !== priceChart)
-            );
-            if (mainTimeScaleHandler) {
-                priceChart._syncHandlers.push(mainTimeScaleHandler);
-            }
 
             // 为了解决同步问题，强制同步所有图表状态
             const forceSyncAllCharts = () => {
                 // 立即应用，不延迟
                 const mainVisibleRange = priceChart.timeScale().getVisibleRange();
-                const mainBarSpacing = priceChart.timeScale().barSpacing();
+                const mainOptions = priceChart.timeScale().options();
                 const mainLogicalRange = priceChart.timeScale().getVisibleLogicalRange();
                 
                 allCharts.forEach(chart => {
                     if (chart !== priceChart) {
                         try {
-                            // 首先设置图表的barSpacing
-                            if (mainBarSpacing) {
-                                chart.timeScale().setBarSpacing(mainBarSpacing);
+                            // 首先应用相同的选项
+                            if (mainOptions) {
+                                chart.timeScale().applyOptions(mainOptions);
                             }
                             
-                            // 然后同时应用可见范围和逻辑范围，确保它们同步
+                            // 然后应用可见范围和逻辑范围，确保它们同步
                             if (mainVisibleRange) {
                                 chart.timeScale().setVisibleRange(mainVisibleRange);
                             }
@@ -805,10 +1118,6 @@ window.dash_clientside.clientside = {
                             if (mainLogicalRange) {
                                 chart.timeScale().setVisibleLogicalRange(mainLogicalRange);
                             }
-                            
-                            // 确保所有图表的timeScale有相同的选项
-                            const srcOptions = priceChart.timeScale().options();
-                            chart.timeScale().applyOptions(srcOptions);
                         } catch (e) {
                             console.error('强制同步图表失败:', e);
                         }
@@ -819,111 +1128,65 @@ window.dash_clientside.clientside = {
             // 公开forceSyncAllCharts到全局作用域，以便其他函数可以使用
             window.forceSyncAllCharts = forceSyncAllCharts;
             
-            // 监听所有辅助图表的操作，但不让它们控制主图表
-            // 而是在它们被操作时，强制它们与主图表同步
-            const handleSecondaryChartInteraction = (e) => {
-                // 为了避免循环，在操作辅助图表后，强制设置为主图表的状态
-                setTimeout(() => {
-                    forceSyncAllCharts();
-                }, 0);
-            };
-            
-            // 在所有辅助图表上添加交互监听器
+            // 严格的双向同步 - 所有图表都可以控制其他图表
             allCharts.forEach(chart => {
-                if (chart !== priceChart) {
-                    const element = chart.chartElement || (
-                        chart === volumeChart ? volumeContainer : 
-                        chart === rsiChart ? rsiContainer : 
-                        chart === macdChart ? macdContainer : null
-                    );
-                    
-                    if (element) {
-                        // 监听滚轮事件
-                        const wheelHandler = (e) => {
-                            handleSecondaryChartInteraction(e);
-                        };
-                        element.addEventListener('wheel', wheelHandler, { passive: true });
-                        chart._eventListeners.push({ element, type: 'wheel', handler: wheelHandler });
-                        
-                        // 监听鼠标按下事件，可能是拖拽开始
-                        const mouseDownHandler = (e) => {
-                            const mouseMoveHandler = (e) => {
-                                handleSecondaryChartInteraction(e);
-                            };
-                            
-                            document.addEventListener('mousemove', mouseMoveHandler);
-                            
-                            const mouseUpHandler = () => {
-                                document.removeEventListener('mousemove', mouseMoveHandler);
-                                document.removeEventListener('mouseup', mouseUpHandler);
-                                
-                                // 在鼠标释放时，再次同步
-                                handleSecondaryChartInteraction(e);
-                            };
-                            
-                            document.addEventListener('mouseup', mouseUpHandler, { once: true });
-                        };
-                        
-                        element.addEventListener('mousedown', mouseDownHandler);
-                        chart._eventListeners.push({ element, type: 'mousedown', handler: mouseDownHandler });
+                const otherCharts = allCharts.filter(c => c !== chart);
+                
+                // 时间轴同步
+                const timeScaleHandler = syncTimeScale(chart, otherCharts);
+                if (timeScaleHandler) {
+                    chart._syncHandlers.push(timeScaleHandler);
                     }
-                }
+            
+                // 十字线同步
+                const crosshairHandler = syncCrosshair(chart, otherCharts);
+            if (crosshairHandler) {
+                    chart._syncHandlers.push(crosshairHandler);
+            }
             });
             
-            // 只有主图表的十字线同步到其他图表
-            // 禁用从辅助图表到主图表的十字线同步，避免潜在的循环
-            const crosshairHandler = syncCrosshair(priceChart, 
-                allCharts.filter(c => c !== priceChart)
-            );
-            if (crosshairHandler) {
-                priceChart._syncHandlers.push(crosshairHandler);
-            }
-            
-            // 确保所有图表初始设置一致
+            // 强制同步所有图表状态 - 确保初始状态一致
             setTimeout(() => {
-                try {
                     forceSyncAllCharts();
-                } catch (error) {
-                    console.error('初始同步图表设置失败:', error);
-                }
             }, 100);
             
-            // 主图表的特殊处理
             // 监听主图表的滚轮和鼠标事件，确保更新后所有图表都同步
-            const handleMainChartWheel = (e) => {
-                // 立即同步，不延迟
-                forceSyncAllCharts();
-                
-                // 为确保同步完整，0毫秒后再次同步
-                setTimeout(() => {
-                    forceSyncAllCharts();
-                }, 0);
-                
-                // 添加额外的延迟同步以确保完全同步
+            const handleChartWheel = (e) => {
+                // 为确保同步完整，稍后再次同步
                 setTimeout(() => {
                     forceSyncAllCharts();
                 }, 50);
             };
             
-            // 监听主图表容器的滚轮事件
-            chartContainer.addEventListener('wheel', handleMainChartWheel, { passive: true });
-            priceChart._eventListeners.push({ element: chartContainer, type: 'wheel', handler: handleMainChartWheel });
+            // 为每个图表添加滚轮事件监听
+            allCharts.forEach(chart => {
+                let containerEl;
+                
+                // 安全地检查每个图表及其对应的容器
+                if (chart === priceChart) { 
+                    containerEl = chartContainer; 
+                }
+                else if (chart === volumeChart) { 
+                    containerEl = volumeContainer; 
+                }
+                else if (chart === rsiChart && typeof rsiContainer !== 'undefined') { 
+                    containerEl = rsiContainer; 
+                }
+                else if (chart === macdChart && typeof macdContainer !== 'undefined') { 
+                    containerEl = macdContainer; 
+                }
+                
+                if (containerEl) {
+                    containerEl.addEventListener('wheel', handleChartWheel, { passive: true });
+                    chart._eventListeners.push({ element: containerEl, type: 'wheel', handler: handleChartWheel });
             
-            // 监听主图表的鼠标按下事件（拖拽开始）
-            const handleMainChartMouseDown = (e) => {
+                    // 监听鼠标按下事件（拖拽开始）
+                    const handleMouseDown = (e) => {
                 const mouseMoveHandler = (e) => {
-                    // 立即同步，不延迟
-                    forceSyncAllCharts();
-                    
-                    // 为确保同步完整，0毫秒后再次同步
-                    setTimeout(() => {
+                            // 在拖拽过程中同步图表
+                            requestAnimationFrame(() => {
                         forceSyncAllCharts();
-                    }, 0);
-                    
-                    // 添加额外的延迟同步以确保完全同步
-                    setTimeout(() => {
-                        forceSyncAllCharts();
-                    }, 50);
+                            });
                 };
                 
                 document.addEventListener('mousemove', mouseMoveHandler);
@@ -935,14 +1198,16 @@ window.dash_clientside.clientside = {
                     // 在鼠标释放时，再次同步
                     setTimeout(() => {
                         forceSyncAllCharts();
-                    }, 0);
+                            }, 50);
                 };
                 
                 document.addEventListener('mouseup', mouseUpHandler, { once: true });
             };
             
-            chartContainer.addEventListener('mousedown', handleMainChartMouseDown);
-            priceChart._eventListeners.push({ element: chartContainer, type: 'mousedown', handler: handleMainChartMouseDown });
+                    containerEl.addEventListener('mousedown', handleMouseDown);
+                    chart._eventListeners.push({ element: containerEl, type: 'mousedown', handler: handleMouseDown });
+                }
+            });
         };
 
         // 全局调整图表大小函数
@@ -961,9 +1226,8 @@ window.dash_clientside.clientside = {
             try {
                 mainChartSettings = {
                     visibleRange: priceChart.timeScale().getVisibleRange(),
-                    barSpacing: priceChart.timeScale().barSpacing(),
-                    logicalRange: priceChart.timeScale().getVisibleLogicalRange(),
-                    options: priceChart.timeScale().options()
+                    options: priceChart.timeScale().options(),
+                    logicalRange: priceChart.timeScale().getVisibleLogicalRange()
                 };
             } catch (e) {
                 console.error('获取主图表设置失败:', e);
@@ -1014,10 +1278,7 @@ window.dash_clientside.clientside = {
                                 priceChart.timeScale().applyOptions(mainChartSettings.options);
                             }
                             
-                            // 然后设置缩放和范围
-                            if (mainChartSettings.barSpacing) {
-                                priceChart.timeScale().setBarSpacing(mainChartSettings.barSpacing);
-                            }
+                            // 然后设置范围
                             if (mainChartSettings.visibleRange) {
                                 priceChart.timeScale().setVisibleRange(mainChartSettings.visibleRange);
                             }
@@ -1032,9 +1293,8 @@ window.dash_clientside.clientside = {
                         setTimeout(() => {
                             // 获取主图表当前的设置
                             const mainVisibleRange = priceChart.timeScale().getVisibleRange();
-                            const mainBarSpacing = priceChart.timeScale().barSpacing();
-                            const mainLogicalRange = priceChart.timeScale().getVisibleLogicalRange();
                             const mainOptions = priceChart.timeScale().options();
+                            const mainLogicalRange = priceChart.timeScale().getVisibleLogicalRange();
                             
                             // 将主图表设置同步到其他图表
                             allCharts.forEach(chart => {
@@ -1045,10 +1305,7 @@ window.dash_clientside.clientside = {
                                             chart.timeScale().applyOptions(mainOptions);
                                         }
                                         
-                                        // 应用相同的缩放和范围
-                                        if (mainBarSpacing) {
-                                            chart.timeScale().setBarSpacing(mainBarSpacing);
-                                        }
+                                        // 应用相同的范围
                                         if (mainVisibleRange) {
                                             chart.timeScale().setVisibleRange(mainVisibleRange);
                                         }
@@ -1097,16 +1354,42 @@ window.dash_clientside.clientside = {
         });
         
         // 创建价格图表图例
-        createLegend(priceChart, chartContainer, [
-            { label: 'EMA20', color: '#f48fb1' },
-            { label: '上涨', color: '#26a69a' },
-            { label: '下跌', color: '#ef5350' },
-        ]);
+        const legendItems = [
+            { text: '蜡烛图', color: '#26a69a' },
+        ];
+        
+        if (showEma) {
+            legendItems.push({ text: 'EMA20', color: '#f48fb1' });
+        }
+        
+        if (showBollinger) {
+            legendItems.push({ text: '布林带', color: '#90caf9' });
+        }
+        
+        createLegend(priceChart, chartContainer, legendItems);
         
         // 创建成交量图表图例
         createLegend(volumeChart, volumeContainer, [
-            { label: '成交量', color: '#26a69a' },
+            { text: '成交量', color: '#26a69a' },
         ]);
+        
+        // 如果有RSI，创建RSI图表图例
+        if (rsiChart && rsiContainer) {
+            createLegend(rsiChart, rsiContainer, [
+                { text: 'RSI(14)', color: '#7b1fa2' },
+                { text: '超买(70)', color: '#ef5350' },
+                { text: '超卖(30)', color: '#26a69a' },
+        ]);
+        }
+        
+        // 如果有MACD，创建MACD图表图例
+        if (macdChart && macdContainer) {
+            createLegend(macdChart, macdContainer, [
+                { text: 'MACD', color: '#2196F3' },
+                { text: '信号线', color: '#FF9800' },
+                { text: '直方图', color: '#26a69a' },
+            ]);
+        }
         
         // 在这里添加全局样式
         addGlobalStyles();
@@ -1206,6 +1489,9 @@ window.dash_clientside.clientside = {
                 // 创建一个数组来存储所有标记
                 const markers = [];
                 
+                // 创建一个映射，用于存储每个交易的详细信息
+                const tradeDetailsMap = {};
+                
                 // 将交易标记添加到图表
                 tradesData.forEach(trade => {
                     if (!trade.time || !trade.price) {
@@ -1213,14 +1499,33 @@ window.dash_clientside.clientside = {
                         return;
                     }
                     
+                    // 确保时间格式正确 - 如果是毫秒时间戳，转换为秒
+                    const tradeTime = typeof trade.time === 'number' && trade.time > 1000000000000 
+                        ? Math.floor(trade.time / 1000) 
+                        : trade.time;
+                    
+                    // 创建带有ID的标记，以便后续可以识别
+                    const tradeId = `trade-${tradeTime}-${trade.side}-${Math.random().toString(36).substr(2, 5)}`;
+                    
                     // 创建简单的箭头标记
                     const marker = {
-                        time: trade.time,
+                        time: tradeTime,
                         position: trade.side === 'buy' ? 'belowBar' : 'aboveBar', // 买入标记在下方，卖出标记在上方
                         color: trade.side === 'buy' ? '#26a69a' : '#ef5350',
                         shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-                        size: 2, // 增大标记大小，提高可点击/悬停区域
+                        size: 3, // 增大标记大小，提高可点击/悬停区域
                         text: trade.side === 'buy' ? '买' : '卖', // 添加简短文本标识
+                        id: tradeId // 添加ID以便后续识别
+                    };
+                    
+                    // 存储交易详情
+                    tradeDetailsMap[tradeId] = {
+                        time: new Date(tradeTime * 1000).toLocaleString(),
+                        price: trade.price,
+                        side: trade.side === 'buy' ? '买入' : '卖出',
+                        amount: trade.amount || 0,
+                        cost: trade.cost || (trade.price * (trade.amount || 0)),
+                        ...trade // 保存原始交易数据的所有字段
                     };
                     
                     // 添加到标记数组
@@ -1231,6 +1536,94 @@ window.dash_clientside.clientside = {
                 if (markers.length > 0) {
                     console.log('设置交易标记:', markers.length);
                     candlestickSeries.setMarkers(markers);
+                    
+                    // 将交易详情存储在全局变量中，以便点击事件可以访问
+                    window.tradeDetailsMap = tradeDetailsMap;
+                    
+                    // 创建一个交易详情提示框
+                    const tradeTooltip = document.createElement('div');
+                    tradeTooltip.id = 'trade-tooltip';
+                    tradeTooltip.style.display = 'none';
+                    container.appendChild(tradeTooltip);
+                    
+                    // 添加点击事件处理程序
+                    priceChart.subscribeCrosshairMove((param) => {
+                        if (!param || !param.hoveredObjectId) {
+                            // 如果没有悬停在标记上，隐藏提示框
+                            tradeTooltip.style.display = 'none';
+                            return;
+                        }
+                        
+                        // 检查是否悬停在交易标记上
+                        const hoveredId = param.hoveredObjectId;
+                        if (hoveredId && hoveredId.startsWith('trade-') && tradeDetailsMap[hoveredId]) {
+                            const tradeDetails = tradeDetailsMap[hoveredId];
+                            
+                            // 更新提示框内容
+                            tradeTooltip.innerHTML = `
+                                <div><strong>时间:</strong> ${tradeDetails.time}</div>
+                                <div><strong>方向:</strong> ${tradeDetails.side}</div>
+                                <div><strong>价格:</strong> ${tradeDetails.price}</div>
+                                <div><strong>数量:</strong> ${tradeDetails.amount}</div>
+                                <div><strong>价值:</strong> ${tradeDetails.cost}</div>
+                            `;
+                            
+                            // 定位提示框
+                            if (param.point) {
+                                const chartRect = container.getBoundingClientRect();
+                                const x = param.point.x + chartRect.left;
+                                const y = param.point.y + chartRect.top;
+                                
+                                // 根据点击位置调整提示框位置，避免超出视口
+                                tradeTooltip.style.left = `${x + 15}px`;
+                                tradeTooltip.style.top = `${y - 10}px`;
+                                tradeTooltip.style.display = 'block';
+                            }
+                        } else {
+                            tradeTooltip.style.display = 'none';
+                        }
+                    });
+                    
+                    // 添加点击事件处理
+                    chartContainer.addEventListener('click', (e) => {
+                        // 检查是否点击了标记 - 通过crosshairMove事件已经处理了悬停状态
+                        // 这里只需要确保点击时提示框保持可见
+                        if (tradeTooltip.style.display === 'block') {
+                            // 防止点击事件冒泡，以便提示框保持可见
+                            e.stopPropagation();
+                            
+                            // 添加一个标记，表示提示框处于"锁定"状态
+                            tradeTooltip.dataset.locked = 'true';
+                            
+                            // 添加一个关闭按钮
+                            if (!tradeTooltip.querySelector('.close-btn')) {
+                                const closeBtn = document.createElement('div');
+                                closeBtn.className = 'close-btn';
+                                closeBtn.innerHTML = '×';
+                                closeBtn.style.position = 'absolute';
+                                closeBtn.style.top = '2px';
+                                closeBtn.style.right = '5px';
+                                closeBtn.style.cursor = 'pointer';
+                                closeBtn.style.fontWeight = 'bold';
+                                closeBtn.style.color = 'white';
+                                
+                                closeBtn.addEventListener('click', (evt) => {
+                                    tradeTooltip.style.display = 'none';
+                                    tradeTooltip.dataset.locked = 'false';
+                                    evt.stopPropagation();
+                                });
+                                
+                                tradeTooltip.appendChild(closeBtn);
+                            }
+                        }
+                    });
+                    
+                    // 点击图表其他区域时关闭提示框
+                    document.addEventListener('click', () => {
+                        if (tradeTooltip.dataset.locked !== 'true') {
+                            tradeTooltip.style.display = 'none';
+                        }
+                    });
                 }
                 
                 // 刷新主图表，确保标记显示

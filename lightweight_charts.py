@@ -84,7 +84,7 @@ def initialize_exchange():
     
     return exchange
 
-def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', limit=200):
+def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', limit=400):
     """获取K线历史数据"""
     try:
         logger.info(f"获取 {symbol} 的 {timeframe} K线数据, 数量: {limit}...")
@@ -254,21 +254,71 @@ def fetch_trades(exchange, symbol='NXPC/USDT:USDT', since=None, until=None, limi
             until = int(until)
         
         # 使用标准的CCXT方法获取交易记录
+        trades = []
         try:
-            # 先尝试使用fetch_my_trades方法
-            trades = exchange.fetch_my_trades(symbol=symbol, limit=limit, params=params)
-            logger.info(f"使用fetch_my_trades方法获取交易记录")
+            # 使用正确的CCXT方法名 - 驼峰命名法
+            logger.info("尝试使用fetchMyTrades方法获取交易记录")
+            trades = exchange.fetchMyTrades(symbol=symbol, limit=limit, params=params)
         except Exception as e:
-            logger.error(f"使用fetch_my_trades获取交易记录失败: {str(e)}")
-            logger.info("尝试使用fetch_orders方法...")
+            logger.error(f"使用fetchMyTrades获取交易记录失败: {str(e)}")
             
             try:
-                # 如果fetch_my_trades失败，尝试使用fetch_orders
-                trades = exchange.fetch_orders(symbol=symbol, limit=limit, params=params)
-                logger.info(f"使用fetch_orders方法获取交易记录")
+                # 尝试使用fetchOrders获取订单记录
+                logger.info("尝试使用fetchOrders方法...")
+                orders = exchange.fetchOrders(symbol=symbol, limit=limit, params=params)
+                
+                # 如果获取到订单，尝试提取其中已成交的部分作为交易记录
+                if orders:
+                    logger.info(f"获取到 {len(orders)} 个订单，尝试提取已成交部分")
+                    trades = []
+                    for order in orders:
+                        if order.get('status') in ['closed', 'filled'] and order.get('filled', 0) > 0:
+                            # 提取订单中的交易信息
+                            trade_info = {
+                                'id': order.get('id'),
+                                'timestamp': order.get('timestamp'),
+                                'datetime': order.get('datetime'),
+                                'symbol': order.get('symbol'),
+                                'side': order.get('side'),
+                                'price': order.get('price'),
+                                'amount': order.get('filled'),
+                                'cost': order.get('cost'),
+                                'fee': order.get('fee'),
+                                'info': order.get('info')
+                            }
+                            trades.append(trade_info)
+                    logger.info(f"从订单中提取了 {len(trades)} 条交易记录")
             except Exception as e2:
-                logger.error(f"使用fetch_orders获取交易记录失败: {str(e2)}")
-                return pd.DataFrame()
+                logger.error(f"使用fetchOrders获取订单记录失败: {str(e2)}")
+                
+                try:
+                    # 再尝试使用fetchClosedOrders获取已完成的订单
+                    logger.info("尝试使用fetchClosedOrders方法...")
+                    closed_orders = exchange.fetchClosedOrders(symbol=symbol, limit=limit, params=params)
+                    
+                    # 处理已完成订单
+                    if closed_orders:
+                        logger.info(f"获取到 {len(closed_orders)} 个已完成订单，尝试提取交易记录")
+                        trades = []
+                        for order in closed_orders:
+                            if order.get('filled', 0) > 0:
+                                # 提取订单中的交易信息
+                                trade_info = {
+                                    'id': order.get('id'),
+                                    'timestamp': order.get('timestamp'),
+                                    'datetime': order.get('datetime'),
+                                    'symbol': order.get('symbol'),
+                                    'side': order.get('side'),
+                                    'price': order.get('price'),
+                                    'amount': order.get('filled'),
+                                    'cost': order.get('cost'),
+                                    'fee': order.get('fee'),
+                                    'info': order.get('info')
+                                }
+                                trades.append(trade_info)
+                        logger.info(f"从已完成订单中提取了 {len(trades)} 条交易记录")
+                except Exception as e3:
+                    logger.error(f"使用fetchClosedOrders获取已完成订单失败: {str(e3)}")
         
         # 如果没有交易记录，返回空DataFrame
         if not trades:
