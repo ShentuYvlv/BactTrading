@@ -30,7 +30,7 @@ const formatBeijingTime = (timestamp) => {
     const date = new Date(correctedTimestamp);
     
     // 调整时间：减去10个小时
-    const adjustedDate = new Date(date.getTime() - (1 * 60 * 60 * 1000-1));
+    const adjustedDate = new Date(date.getTime());
     
     // 格式化日期和时间
     const formattedDate = `${adjustedDate.getFullYear()}-${pad(adjustedDate.getMonth() + 1)}-${pad(adjustedDate.getDate())}`;

@@ -185,121 +185,39 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
         except Exception as e:
             logger.error(f"加载市场数据失败: {str(e)}")
         
-        # 增大批处理参数以提高性能
-        batch_limit = 1500  # 增加每批获取的数据量，减少API调用次数
-        
-        # 一些交易所可能有数据量限制，分批获取以克服限制
+        # 使用单一请求策略获取数据
         all_ohlcv = []
+        batch_limit = 1000  # 每批获取的数据量
         
-        # 保存并行任务
-        threads = []
-        results = {}
-        
-        # 如果指定了时间范围，计算合适的分段
+        # 如果指定了时间范围，直接获取该范围的数据
         if formatted_since and formatted_until:
-            # 计算时间范围的毫秒数
-            time_range_ms = formatted_until - formatted_since
-            
-            # 根据K线周期估算需要获取的K线数量
-            timeframe_ms = {
-                '1m': 60 * 1000,
-                '3m': 3 * 60 * 1000,
-                '5m': 5 * 60 * 1000,
-                '15m': 15 * 60 * 1000,
-                '30m': 30 * 60 * 1000,
-                '1h': 60 * 60 * 1000,
-                '2h': 2 * 60 * 60 * 1000,
-                '4h': 4 * 60 * 60 * 1000,
-                '6h': 6 * 60 * 60 * 1000,
-                '8h': 8 * 60 * 60 * 1000,
-                '12h': 12 * 60 * 60 * 1000,
-                '1d': 24 * 60 * 60 * 1000,
-                '3d': 3 * 24 * 60 * 60 * 1000,
-                '1w': 7 * 24 * 60 * 60 * 1000,
-                '1M': 30 * 24 * 60 * 60 * 1000,
-            }
-            
-            timeframe_duration = timeframe_ms.get(timeframe, 60 * 60 * 1000)  # 默认1小时
-            estimated_candles = time_range_ms / timeframe_duration
-            
-            logger.info(f"估计需要获取 {estimated_candles:.0f} 条K线")
-            
-            # 如果预计数量超过阈值，使用并行获取
-            if estimated_candles > 5000:
-                # 将时间范围分为多个段
-                segments = []
-                segment_size_ms = batch_limit * timeframe_duration  # 每个段的时间跨度
+            try:
+                logger.info(f"直接获取指定时间范围的数据: {pd.to_datetime(formatted_since, unit='ms')} 到 {pd.to_datetime(formatted_until, unit='ms')}")
                 
-                # 根据时间范围划分段
-                current_start = formatted_since
-                while current_start < formatted_until:
-                    current_end = min(current_start + segment_size_ms, formatted_until)
-                    segments.append((current_start, current_end))
-                    current_start = current_end + 1
+                # 设置参数
+                params = {
+                    'startTime': formatted_since,
+                    'endTime': formatted_until
+                }
                 
-                logger.info(f"将时间范围分为 {len(segments)} 个段并行获取")
+                # 获取数据
+                all_ohlcv = exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=batch_limit,
+                    params=params
+                )
                 
-                # 定义获取单个段的函数
-                def fetch_segment(segment_index, start_time, end_time):
-                    segment_params = {'since': start_time}
-                    segment_data = []
-                    
-                    try:
-                        logger.info(f"获取段 {segment_index+1}/{len(segments)}: {pd.to_datetime(start_time, unit='ms')} - {pd.to_datetime(end_time, unit='ms')}")
-                        segment_batch = exchange.fetch_ohlcv(
-                            symbol=symbol,
-                            timeframe=timeframe,
-                            limit=batch_limit,
-                            params=segment_params
-                        )
-                        
-                        if segment_batch:
-                            # 过滤结束时间之后的数据
-                            segment_data = [candle for candle in segment_batch if candle[0] <= end_time]
-                            logger.info(f"段 {segment_index+1} 获取了 {len(segment_data)} 条K线")
-                    except Exception as e:
-                        logger.error(f"获取段 {segment_index+1} 失败: {str(e)}")
-                    
-                    # 存储结果
-                    results[segment_index] = segment_data
+                logger.info(f"获取了 {len(all_ohlcv)} 条K线数据")
+            except Exception as e:
+                logger.error(f"获取指定时间范围数据失败: {str(e)}")
+                # 如果直接获取失败，尝试分批获取
+                logger.info("尝试分批获取数据...")
                 
-                # 创建并启动线程
-                for i, (start, end) in enumerate(segments):
-                    thread = threading.Thread(target=fetch_segment, args=(i, start, end))
-                    threads.append(thread)
-                    thread.start()
-                    # 不要启动太多线程，避免API限制
-                    if len(threads) >= 5:
-                        for t in threads:
-                            t.join()
-                        threads = []
-                
-                # 等待所有线程完成
-                for thread in threads:
-                    thread.join()
-                
-                # 按顺序合并结果
-                for i in range(len(segments)):
-                    segment_data = results.get(i, [])
-                    all_ohlcv.extend(segment_data)
-                
-                logger.info(f"并行获取完成，总共获取 {len(all_ohlcv)} 条K线")
-                
-            else:
-                # 数据量较小，使用标准方式获取
-                logger.info(f"使用标准方式获取数据")
-                
-                # 根据时间范围分批获取数据
                 current_since = formatted_since
-                
-                while True:
-                    # 更新参数中的since
-                    params = {}
-                    if current_since:
-                        params = {'since': current_since}
-                        
-                    # 获取一批数据
+                while current_since < formatted_until:
                     try:
+                        params = {'since': current_since}
                         batch = exchange.fetch_ohlcv(
                             symbol=symbol,
                             timeframe=timeframe,
@@ -307,20 +225,15 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
                             params=params
                         )
                         
-                        # 如果没有返回数据，则退出循环
                         if not batch or len(batch) == 0:
                             break
                             
-                        # 将此批次数据添加到结果中
-                        all_ohlcv.extend(batch)
+                        # 过滤结束时间之后的数据
+                        batch = [candle for candle in batch if candle[0] <= formatted_until]
                         
-                        # 记录进度
+                        all_ohlcv.extend(batch)
                         logger.info(f"已获取 {len(all_ohlcv)} 条K线数据")
                         
-                        # 检查是否达到结束时间
-                        if formatted_until and batch[-1][0] >= formatted_until:
-                            break
-                            
                         # 如果返回的数据量小于请求的限制，说明已经获取了所有数据
                         if len(batch) < batch_limit:
                             break
@@ -330,12 +243,10 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
                         
                         # 短暂等待避免超过API速率限制
                         time.sleep(0.5)
-                        
                     except Exception as e:
                         logger.error(f"获取K线批次失败: {str(e)}")
-                        # 短暂等待后重试
                         time.sleep(2)
-                        continue
+                        break  # 出错时停止循环，避免无限重试
         else:
             # 没有指定时间范围，获取最近的数据
             try:
@@ -347,10 +258,6 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
                 logger.info(f"获取了 {len(all_ohlcv)} 条最近的K线数据")
             except Exception as e:
                 logger.error(f"获取K线数据失败: {str(e)}")
-        
-        # 如果有until参数，过滤结束时间之后的数据
-        if formatted_until and all_ohlcv:
-            all_ohlcv = [candle for candle in all_ohlcv if candle[0] <= formatted_until]
         
         if not all_ohlcv or len(all_ohlcv) == 0:
             logger.warning(f"未获取到 {symbol} 的K线数据")
@@ -380,7 +287,7 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
 
 def add_technical_indicators(df):
     """添加技术指标到DataFrame"""
-    # 添加EMA20指标
+    # 添加EMA20指标   刻录机
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     
     # 添加RSI指标
@@ -899,6 +806,8 @@ def merge_trades_to_positions(trades_df):
     if positions:
         positions_df = pd.DataFrame(positions)
         logger.info(f"成功合并为 {len(positions_df)} 个仓位")
+        positions_df.to_excel("positions.xlsx", index=False)
+        print("文件已保存为 positions.xlsx")
         return positions_df
     else:
         logger.info("没有找到有效的仓位")
@@ -938,35 +847,270 @@ def create_app():
                 });
             </script>
             <style>
-                /* 自定义样式 - 黑色背景下拉框 */
+                /* 全局样式 */
+                body {
+                    background-color: #0a0e17;
+                    color: #e0e3eb;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                }
+                
+                /* 容器样式 */
+                .container-fluid {
+                    padding: 1rem;
+                    width: 100%;        /* 宽度自适应 */
+                    height: 100%;       /* 高度自适应父元素 */
+                    box-sizing: border-box; /* 包含内边距和边框 */
+                    margin: 0 auto;
+                }
+                
+                /* 卡片样式 */
+                .card {
+                    background-color: #131722;
+                    border-radius: 8px;
+                    border: 1px solid #2B2B43;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    transition: all 0.3s ease;
+                }
+                
+                .card:hover {
+                    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+                }
+                
+                /* 按钮样式 */
+                .btn {
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                }
+                
+                .btn-primary {
+                    background-color: #2962ff;
+                    border-color: #2962ff;
+                }
+                
+                .btn-primary:hover {
+                    background-color: #1546e0;
+                    border-color: #1546e0;
+                }
+                
+                .btn-secondary {
+                    background-color: #363a45;
+                    border-color: #363a45;
+                }
+                
+                .btn-secondary:hover {
+                    background-color: #2a2e39;
+                    border-color: #2a2e39;
+                }
+                
+                /* 表单控件样式 */
+                .form-control, .form-control-sm {
+                    background-color: #1c2030;
+                    border: 1px solid #2B2B43;
+                    color: #e0e3eb;
+                    border-radius: 6px;
+                    transition: all 0.2s ease;
+                }
+                
+                .form-control:focus, .form-control-sm:focus {
+                    background-color: #232838;
+                    border-color: #2962ff;
+                    box-shadow: 0 0 0 0.2rem rgba(41, 98, 255, 0.25);
+                    color: #ffffff;
+                }
+                
+                /* 标签样式 */
+                label {
+                    font-weight: 500;
+                    color: #9aa1b9;
+                    font-size: 0.9rem;
+                }
+                
+                /* 下拉框自定义样式 */
                 .dash-dropdown .Select-control {
-                    background-color: #121212 !important;
-                    color: white !important;
+                    background-color: #1c2030 !important;
+                    color: #e0e3eb !important;
                     border-color: #2B2B43 !important;
+                    border-radius: 6px !important;
+                    transition: all 0.2s ease !important;
                 }
+                
+                .dash-dropdown .Select-control:hover {
+                    border-color: #3a3f50 !important;
+                }
+                
+                .dash-dropdown.is-focused .Select-control {
+                    background-color: #232838 !important;
+                    border-color: #2962ff !important;
+                    box-shadow: 0 0 0 0.2rem rgba(41, 98, 255, 0.25) !important;
+                }
+                
                 .dash-dropdown .Select-menu-outer {
-                    background-color: #121212 !important;
-                    color: white !important;
+                    background-color: #1c2030 !important;
+                    color: #e0e3eb !important;
                     border-color: #2B2B43 !important;
+                    border-radius: 0 0 6px 6px !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
                 }
+                
                 .dash-dropdown .Select-value-label {
-                    color: white !important;
+                    color: #e0e3eb !important;
                 }
+                
                 .dash-dropdown .Select-menu-outer .VirtualizedSelectOption {
-                    background-color: #121212 !important;
-                    color: white !important;
+                    background-color: #1c2030 !important;
+                    color: #e0e3eb !important;
                 }
-                .dash-dropdown .Select-menu-outer .VirtualizedSelectOption:hover {
-                    background-color: #2B2B43 !important;
+                
+                .dash-dropdown .Select-menu-outer .VirtualizedSelectOption:hover,
+                .dash-dropdown .Select-menu-outer .VirtualizedSelectFocusedOption {
+                    background-color: #232838 !important;
                 }
+                
                 .dash-dropdown .Select-value {
                     border-color: #2B2B43 !important;
                 }
+                
                 .dash-dropdown .Select-arrow {
-                    border-color: white transparent transparent !important;
+                    border-color: #9aa1b9 transparent transparent !important;
                 }
+                
                 .dash-dropdown .is-open .Select-arrow {
-                    border-color: transparent transparent white !important;
+                    border-color: transparent transparent #9aa1b9 !important;
+                }
+                
+                /* 日期选择器样式 */
+                .SingleDatePickerInput {
+                    background-color: #1c2030 !important;
+                    border: 1px solid #2B2B43 !important;
+                    border-radius: 6px !important;
+                    transition: all 0.2s ease !important;
+                }
+                
+                .SingleDatePickerInput:hover {
+                    border-color: #3a3f50 !important;
+                }
+                
+                .SingleDatePickerInput .DateInput {
+                    background: transparent !important;
+                }
+                
+                .SingleDatePickerInput .DateInput_input {
+                    background: transparent !important;
+                    color: #e0e3eb !important;
+                    font-size: 0.9rem !important;
+                }
+                
+                .SingleDatePickerInput .DateInput_fang {
+                    margin-top: -5px !important;
+                }
+                
+                .DayPicker {
+                    background-color: #1c2030 !important;
+                    border-radius: 6px !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+                }
+                
+                .DayPicker_weekHeader {
+                    color: #9aa1b9 !important;
+                }
+                
+                .CalendarMonth_caption {
+                    color: #e0e3eb !important;
+                }
+                
+                .DayPicker_day {
+                    color: #e0e3eb !important;
+                    border-radius: 4px !important;
+                }
+                
+                .DayPicker_day--selected, .DayPicker_day--selected:hover {
+                    background-color: #2962ff !important;
+                    color: white !important;
+                }
+                
+                .DayPicker_day--outside {
+                    color: #5d6484 !important;
+                }
+                
+                .DayPicker_day:hover {
+                    background-color: #232838 !important;
+                }
+                
+                /* 复选框样式 */
+                .form-check-input {
+                    background-color: #1c2030;
+                    border: 1px solid #2B2B43;
+                }
+                
+                .form-check-input:checked {
+                    background-color: #2962ff;
+                    border-color: #2962ff;
+                }
+                
+                .form-check-input:focus {
+                    box-shadow: 0 0 0 0.2rem rgba(41, 98, 255, 0.25);
+                }
+                
+                /* 图表容器样式 */
+                #chart-container {
+                    border-radius: 6px;
+                    overflow: hidden;
+                    background-color: #131722;
+                    transition: all 0.3s ease;
+                }
+                
+                /* 状态信息样式 */
+                #status-info {
+                    padding: 0.5rem;
+                    border-radius: 6px;
+                    background-color: rgba(28, 32, 48, 0.5);
+                }
+                
+                /* 工具提示样式 */
+                #trade-tooltip {
+                    background-color: rgba(28, 32, 48, 0.9) !important;
+                    border-radius: 6px !important;
+                    border: 1px solid #2B2B43 !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+                }
+                
+                /* 进度条样式 */
+                .progress {
+                    background-color: #232838;
+                    border-radius: 6px;
+                }
+                
+                .progress-bar {
+                    background-color: #2962ff;
+                }
+                
+                /* 辅助类 */
+                .text-success {
+                    color: #26a69a !important;
+                }
+                
+                .text-danger {
+                    color: #ef5350 !important;
+                }
+                
+                .text-warning {
+                    color: #ffb74d !important;
+                }
+                
+                .text-info {
+                    color: #42a5f5 !important;
+                }
+                
+                /* 响应式调整 */
+                @media (max-width: 992px) {
+                    .form-label {
+                        font-size: 0.8rem;
+                    }
+                    
+                    .btn {
+                        font-size: 0.8rem;
+                    }
                 }
             </style>
         </head>
@@ -991,301 +1135,197 @@ def create_app():
         {'label': '1天', 'value': '1d'},
     ]
     
-    # 预设的时间范围
-    time_range_options = [
-        {'label': '今天', 'value': 'today'},
-        {'label': '昨天', 'value': 'yesterday'},
-        {'label': '最近7天', 'value': '7d'},
-        {'label': '最近30天', 'value': '30d'},
-        {'label': '本月', 'value': 'this_month'},
-        {'label': '上月', 'value': 'last_month'},
-        {'label': '全部', 'value': 'all'},
-        {'label': '自定义', 'value': 'custom'},
-    ]
-    
     # 应用布局
     app.layout = dbc.Container([
         # 标题行
-        dbc.Row([
-            dbc.Col([
-                html.H1("TradingView Lightweight Charts 示例", className="text-center my-4")
-            ], width=12)
-        ]),
         
-        # 控制行
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        dbc.Row([
-                            # 交易对选择
-                            dbc.Col([
-                                html.Label("交易对"),
-                                dcc.Input(
-                                    id="symbol-input",
-                                    type="text",
-                                    value="NXPC/USDT:USDT",
-                                    className="form-control"
-                                )
-                            ], width=3),
-                            
-                            # 时间周期选择
-                            dbc.Col([
-                                html.Label("时间周期"),
-                                dcc.Dropdown(
-                                    id="timeframe-dropdown",
-                                    options=timeframe_options,
-                                    value="1h",
-                                    clearable=False
-                                )
-                            ], width=2),
-                            
-                            # 时间范围选择
-                            dbc.Col([
-                                html.Label("时间范围"),
-                                dcc.Dropdown(
-                                    id="time-range-dropdown",
-                                    options=time_range_options,
-                                    value="30d",
-                                    clearable=False
-                                )
-                            ], width=2),
-                            
-                            # 自定义日期选择（初始隐藏）
-                            dbc.Col([
-                                html.Label("开始日期"),
-                                dcc.DatePickerSingle(
-                                    id="start-date-picker",
-                                    date=datetime.now().date() - timedelta(days=30),
-                                    display_format="YYYY-MM-DD",
-                                    className="w-100"
-                                )
-                            ], width=2, id="start-date-col", style={"display": "block"}),
-                            
-                            dbc.Col([
-                                html.Label("结束日期"),
-                                dcc.DatePickerSingle(
-                                    id="end-date-picker",
-                                    date=datetime.now().date(),
-                                    display_format="YYYY-MM-DD",
-                                    className="w-100"
-                                )
-                            ], width=2, id="end-date-col", style={"display": "block"}),
-                            
-                            # 加载按钮
-                            dbc.Col([
-                                html.Label("\u00A0"),  # 非断空格，用于对齐
-                                dbc.Button(
-                                    "加载数据",
-                                    id="load-data-button",
-                                    color="primary",
-                                    className="w-100"
-                                )
-                            ], width=1),
-                            
-                            # 重置图表按钮
-                            dbc.Col([
-                                html.Label("\u00A0"),  # 非断空格，用于对齐
-                                dbc.Button(
-                                    "重置图表",
-                                    id="reset-chart-button",
-                                    color="secondary",
-                                    className="w-100"
-                                )
-                            ], width=1),
-                        ]),
-                        
-                        # 精确时间选择行
-                        dbc.Row([
-                            dbc.Col([
-                                html.Label("精确开始时间"),
+        # 控制行 - 使用卡片容器和更紧凑的布局
+        dbc.Card([
+            dbc.CardBody([
+                # 第一行：交易对和时间范围选择
+                dbc.Row([
+                    # 交易对选择
+                    dbc.Col([
+                        html.Label("交易对", className="form-label mb-1"),
+                        dcc.Input(
+                            id="symbol-input",
+                            type="text",
+                            value="NXPC/USDT:USDT",
+                            className="form-control form-control-sm"
+                        )
+                    ], width=3, className="pe-2"),
+                    
+                    # 时间周期选择
+                    dbc.Col([
+                        html.Label("时间周期", className="form-label mb-1"),
+                        dcc.Dropdown(
+                            id="timeframe-dropdown",
+                            options=timeframe_options,
+                            value="1h",
+                            clearable=False,
+                            className="dash-dropdown-sm"
+                        )
+                    ], width=2, className="px-2"),
+                    
+                    # 开始日期选择
+                    dbc.Col([
+                        html.Label("开始日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="start-date-picker",
+                            date=datetime.now().date() - timedelta(days=7),
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
+                    ], width=2, className="px-2"),
+                    
+                    # 结束日期选择
+                    dbc.Col([
+                        html.Label("结束日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="end-date-picker",
+                            date=datetime.now().date(),
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
+                    ], width=2, className="px-2"),
+                    
+                    # 按钮组
+                    dbc.Col([
+                        html.Label("\u00A0", className="d-block mb-1"),  # 非断空格，用于对齐
+                        dbc.ButtonGroup([
+                            dbc.Button(
+                                "加载数据", 
+                                id="load-data-button", 
+                                color="primary", 
+                                size="sm",
+                                className="me-1"
+                            ),
+                            dbc.Button(
+                                "重置图表", 
+                                id="reset-chart-button", 
+                                color="secondary", 
+                                size="sm"
+                            )
+                        ], className="w-100")
+                    ], width=3, className="ps-2"),
+                ], className="mb-2 align-items-end"),
+                
+                # 第二行：指标选项和状态
+                dbc.Row([
+                    # 指标选项卡片
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
                                 dbc.Row([
+                                    # 显示交易记录选项
                                     dbc.Col([
-                                        dcc.Input(
-                                            id="start-hour-input",
-                                            type="number",
-                                            min=0,
-                                            max=23,
-                                            value=0,
-                                            className="form-control",
-                                            placeholder="时"
-                                        )
-                                    ], width=4),
+                                        dbc.Checkbox(
+                                            id="show-trades-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "交易记录",
+                                            className="form-check-label ms-2 small"
+                                        ),
+                                    ], width="auto", className="d-flex align-items-center me-3"),
+                                    
+                                    # 显示EMA20选项
                                     dbc.Col([
-                                        dcc.Input(
-                                            id="start-minute-input",
-                                            type="number",
-                                            min=0,
-                                            max=59,
-                                            value=0,
-                                            className="form-control",
-                                            placeholder="分"
-                                        )
-                                    ], width=4),
+                                        dbc.Checkbox(
+                                            id="show-ema-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "EMA20",
+                                            className="form-check-label ms-2 small"
+                                        ),
+                                    ], width="auto", className="d-flex align-items-center me-3"),
+                                    
+                                    # 显示布林带选项
                                     dbc.Col([
-                                        dcc.Input(
-                                            id="start-second-input",
-                                            type="number",
-                                            min=0,
-                                            max=59,
-                                            value=0,
-                                            className="form-control",
-                                            placeholder="秒"
-                                        )
-                                    ], width=4),
-                                ])
-                            ], width=3, id="start-time-col", style={"display": "block"}),
-                            
-                            dbc.Col([
-                                html.Label("精确结束时间"),
-                                dbc.Row([
+                                        dbc.Checkbox(
+                                            id="show-bollinger-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "布林带",
+                                            className="form-check-label ms-2 small"
+                                        ),
+                                    ], width="auto", className="d-flex align-items-center me-3"),
+                                    
+                                    # 显示RSI指标选项
                                     dbc.Col([
-                                        dcc.Input(
-                                            id="end-hour-input",
-                                            type="number",
-                                            min=0,
-                                            max=23,
-                                            value=23,
-                                            className="form-control",
-                                            placeholder="时"
-                                        )
-                                    ], width=4),
+                                        dbc.Checkbox(
+                                            id="show-rsi-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "RSI",
+                                            className="form-check-label ms-2 small"
+                                        ),
+                                    ], width="auto", className="d-flex align-items-center me-3"),
+                                    
+                                    # 显示MACD指标选项
                                     dbc.Col([
-                                        dcc.Input(
-                                            id="end-minute-input",
-                                            type="number",
-                                            min=0,
-                                            max=59,
-                                            value=59,
-                                            className="form-control",
-                                            placeholder="分"
-                                        )
-                                    ], width=4),
-                                    dbc.Col([
-                                        dcc.Input(
-                                            id="end-second-input",
-                                            type="number",
-                                            min=0,
-                                            max=59,
-                                            value=59,
-                                            className="form-control",
-                                            placeholder="秒"
-                                        )
-                                    ], width=4),
-                                ])
-                            ], width=3, id="end-time-col", style={"display": "block"}),
-                            
-                            # 显示交易记录选项
-                            dbc.Col([
-                                dbc.Checkbox(
-                                    id="show-trades-checkbox",
-                                    className="form-check-input",
-                                    value=True,
-                                ),
-                                html.Label(
-                                    "显示交易记录",
-                                    className="form-check-label ms-2"
-                                ),
-                            ], width=2, className="d-flex align-items-center"),
-                            
-                            # 显示EMA20选项
-                            dbc.Col([
-                                dbc.Checkbox(
-                                    id="show-ema-checkbox",
-                                    className="form-check-input",
-                                    value=True,
-                                ),
-                                html.Label(
-                                    "显示EMA20",
-                                    className="form-check-label ms-2"
-                                ),
-                            ], width=2, className="d-flex align-items-center"),
-                            
-                            # 显示布林带选项
-                            dbc.Col([
-                                dbc.Checkbox(
-                                    id="show-bollinger-checkbox",
-                                    className="form-check-input",
-                                    value=False,
-                                ),
-                                html.Label(
-                                    "显示布林带",
-                                    className="form-check-label ms-2"
-                                ),
-                            ], width=2, className="d-flex align-items-center"),
-                            
-                            # 显示RSI指标选项
-                            dbc.Col([
-                                dbc.Checkbox(
-                                    id="show-rsi-checkbox",
-                                    className="form-check-input",
-                                    value=True,
-                                ),
-                                html.Label(
-                                    "显示RSI",
-                                    className="form-check-label ms-2"
-                                ),
-                            ], width=2, className="d-flex align-items-center"),
-                            
-                            # 显示MACD指标选项
-                            dbc.Col([
-                                dbc.Checkbox(
-                                    id="show-macd-checkbox",
-                                    className="form-check-input",
-                                    value=False,
-                                ),
-                                html.Label(
-                                    "显示MACD",
-                                    className="form-check-label ms-2"
-                                ),
-                            ], width=2, className="d-flex align-items-center"),
-                            
-                            # 状态信息显示
-                            dbc.Col([
-                                html.Div(id="status-info")
-                            ], width=2),
-                        ], className="mt-3"),
-                    ])
-                ], className="mb-4")
-            ], width=12)
-        ]),
+                                        dbc.Checkbox(
+                                            id="show-macd-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "MACD",
+                                            className="form-check-label ms-2 small"
+                                        ),
+                                    ], width="auto", className="d-flex align-items-center"),
+                                ], className="g-0 justify-content-start")
+                            ], className="py-1 px-2")
+                        ], className="border-light bg-dark")
+                    ], width=8),
+                    
+                    # 状态信息显示
+                    dbc.Col([
+                        html.Div(id="status-info", className="small")
+                    ], width=4),
+                ]),
+            ], className="p-3")
+        ], className="mb-3 border-secondary"),
         
         # 图表行
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        # 图表容器
-                        html.Div(
-                            id="chart-container",
-                            style={
-                                "width": "100%",
-                                "height": "600px",
-                                "position": "relative"
-                            }
-                        ),
-                        
-                        # 数据存储
-                        dcc.Store(id="chart-data-store"),
-                        dcc.Store(id="trades-data-store"),
-                        
-                        # 添加chart-interaction元素到初始布局
-                        html.Div(id="chart-interaction", style={"display": "none"}),
-                        
-                        # 交互信息显示区
-                        html.Div(
-                            id="chart-info",
-                            className="mt-2"
-                        )
-                    ])
-                ])
-            ], width=12)
-        ]),
+        dbc.Card([
+            dbc.CardBody([
+                # 图表容器
+                html.Div(
+                    id="chart-container",
+                    style={
+                        "width": "100%",
+                        "height": "650px",
+                        "position": "relative"
+                    }
+                ),
+                
+                # 数据存储
+                dcc.Store(id="chart-data-store"),
+                dcc.Store(id="trades-data-store"),
+                
+                # 添加chart-interaction元素到初始布局
+                html.Div(id="chart-interaction", style={"display": "none"}),
+                
+                # 交互信息显示区
+                html.Div(
+                    id="chart-info",
+                    className="mt-2"
+                )
+            ], className="p-0")
+        ], className="border-secondary"),
         
         # 加载动画
         dbc.Spinner(html.Div(id="loading-spinner"), color="primary"),
         
-    ], fluid=True, className="bg-dark text-light")
+    ], fluid=True, className="bg-dark text-light p-3")
     
     # 注册客户端回调函数
     app.clientside_callback(
@@ -1298,99 +1338,39 @@ def create_app():
         [State("chart-container", "id")]
     )
     
-    # 控制自定义日期和时间选择器的显示/隐藏
-    @app.callback(
-        [Output("start-date-col", "style"), 
-         Output("end-date-col", "style"),
-         Output("start-time-col", "style"),
-         Output("end-time-col", "style")],
-        [Input("time-range-dropdown", "value")]
-    )
-    def toggle_date_time_pickers(time_range):
-        if time_range == "custom":
-            return {"display": "block"}, {"display": "block"}, {"display": "block"}, {"display": "block"}
-        else:
-            return {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
-    
-    # 计算时间范围
-    def calculate_time_range(time_range, start_date=None, end_date=None, 
-                           start_hour=0, start_minute=0, start_second=0,
-                           end_hour=23, end_minute=59, end_second=59):
-        now = datetime.now()
+    # 简化后的时间范围计算函数
+    def calculate_time_range(start_date, end_date):
+        """计算开始和结束时间的时间戳
         
-        if time_range == "today":
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now
-        elif time_range == "yesterday":
-            start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(microseconds=1)
-        elif time_range == "7d":
-            start = now - timedelta(days=7)
-            end = now
-        elif time_range == "30d":
-            start = now - timedelta(days=30)
-            end = now
-        elif time_range == "this_month":
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = now
-        elif time_range == "last_month":
-            last_month = now.replace(day=1) - timedelta(days=1)
-            start = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(microseconds=1)
-        elif time_range == "custom" and start_date and end_date:
-            # 自定义日期范围，包含精确时间
-            try:
-                # 转换时间输入为整数
-                start_hour = int(start_hour) if start_hour is not None else 0
-                start_minute = int(start_minute) if start_minute is not None else 0
-                start_second = int(start_second) if start_second is not None else 0
-                end_hour = int(end_hour) if end_hour is not None else 23
-                end_minute = int(end_minute) if end_minute is not None else 59
-                end_second = int(end_second) if end_second is not None else 59
-                
-                # 限制在有效范围内
-                start_hour = max(0, min(23, start_hour))
-                start_minute = max(0, min(59, start_minute))
-                start_second = max(0, min(59, start_second))
-                end_hour = max(0, min(23, end_hour))
-                end_minute = max(0, min(59, end_minute))
-                end_second = max(0, min(59, end_second))
-                
-                # 创建带精确时间的datetime对象
-                start = datetime.combine(
-                    start_date, 
-                    datetime.min.time().replace(
-                        hour=start_hour, 
-                        minute=start_minute, 
-                        second=start_second
-                    )
-                )
-                
-                end = datetime.combine(
-                    end_date, 
-                    datetime.min.time().replace(
-                        hour=end_hour, 
-                        minute=end_minute, 
-                        second=end_second
-                    )
-                )
-                
-                logger.info(f"自定义时间范围: 从 {start} 到 {end}")
-            except Exception as e:
-                logger.error(f"处理自定义时间范围时出错: {e}")
-                # 使用默认值
-                start = datetime.combine(start_date, datetime.min.time())
-                end = datetime.combine(end_date, datetime.max.time())
-        else:  # "all" or default
-            start = None
-            end = None
+        使用用户提供的日期，设置开始日期为0点，结束日期为23:59:59
+        """
+        try:
+            # 创建带精确时间的datetime对象
+            start = datetime.combine(
+                datetime.strptime(start_date, '%Y-%m-%d').date(), 
+                datetime.min.time()  # 00:00:00
+            )
+            
+            end = datetime.combine(
+                datetime.strptime(end_date, '%Y-%m-%d').date(), 
+                datetime.min.time().replace(hour=23, minute=59, second=59)  # 23:59:59
+            )
+            
+            logger.info(f"计算的时间范围: 从 {start} 到 {end}")
+        except Exception as e:
+            logger.error(f"处理时间范围时出错: {e}")
+            # 使用默认值 - 今天和7天前
+            now = datetime.now()
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            logger.info(f"使用默认时间范围: 从 {start} 到 {end}")
         
-        # 转换为时间戳（如果有值）
-        start_ts = int(start.timestamp() * 1000) if start else None
-        end_ts = int(end.timestamp() * 1000) if end else None
+        # 转换为时间戳（毫秒）
+        start_ts = int(start.timestamp() * 1000)
+        end_ts = int(end.timestamp() * 1000)
         
         return start_ts, end_ts
-    
+
     # 加载数据回调
     @app.callback(
         [Output("chart-data-store", "data"), 
@@ -1400,41 +1380,22 @@ def create_app():
         [Input("load-data-button", "n_clicks"), Input("reset-chart-button", "n_clicks")],
         [State("symbol-input", "value"), 
          State("timeframe-dropdown", "value"),
-         State("time-range-dropdown", "value"),
          State("start-date-picker", "date"),
-         State("end-date-picker", "date"),
-         State("start-hour-input", "value"),
-         State("start-minute-input", "value"),
-         State("start-second-input", "value"),
-         State("end-hour-input", "value"),
-         State("end-minute-input", "value"),
-         State("end-second-input", "value")]
+         State("end-date-picker", "date")]
     )
-    def load_chart_data(load_clicks, reset_clicks, symbol, timeframe, time_range, 
-                      start_date, end_date, start_hour, start_minute, start_second,
-                      end_hour, end_minute, end_second):
+    def load_chart_data(load_clicks, reset_clicks, symbol, timeframe, start_date, end_date):
         triggered_id = dash.callback_context.triggered[0]["prop_id"].split(".")[0]
         
         if triggered_id == "load-data-button" and load_clicks:
             try:
                 # 计算时间范围
                 since, until = calculate_time_range(
-                    time_range, start_date, end_date,
-                    start_hour, start_minute, start_second,
-                    end_hour, end_minute, end_second
+                    start_date, end_date
                 )
                 
                 # 创建人类可读的时间范围字符串
-                if since:
-                    since_str = pd.to_datetime(since, unit='ms').strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    since_str = "全部历史"
-                
-                if until:
-                    until_str = pd.to_datetime(until, unit='ms').strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    until_str = "现在"
-                
+                since_str = pd.to_datetime(since, unit='ms').strftime('%Y-%m-%d %H:%M:%S')
+                until_str = pd.to_datetime(until, unit='ms').strftime('%Y-%m-%d %H:%M:%S')
                 time_range_str = f"{since_str} 至 {until_str}"
                 
                 # 获取K线数据
@@ -1448,7 +1409,8 @@ def create_app():
                 
                 # 获取交易记录
                 df_trades = fetch_trades(exchange, symbol, since, until)
-                
+                df_trades.to_excel("trades.xlsx", index=False)
+                print("原始交易文件已保存为 df_trades.xlsx")
                 # 合并交易记录为仓位信息
                 if not df_trades.empty:
                     positions_df = merge_trades_to_positions(df_trades)
@@ -1497,13 +1459,27 @@ def create_app():
                     positions_df = pd.DataFrame()
                     positions_data = []
                 
-                # 返回数据和状态信息
+                # 返回更美观的状态信息
                 status_info = html.Div([
-                    html.Span(f"时间范围: {time_range_str}", className="text-warning me-3"),
-                    html.Span(f"已加载 {len(df)} 条K线数据", className="text-success me-3"),
-                    html.Span(f"已加载 {len(positions_data)} 个交易标记", className="text-info me-3"),
-                    html.Span(f"已合并 {len(positions_df)} 个仓位", className="text-primary")
-                ])
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div([
+                                html.Span("时间范围: ", className="fw-bold small"),
+                                html.Span(f"{time_range_str}", className="text-warning small")
+                            ], className="d-flex align-items-center mb-1")
+                        ], width=12),
+                        dbc.Col([
+                            html.Div([
+                                html.Span("K线数据: ", className="fw-bold small me-1"),
+                                html.Span(f"{len(df)} 条", className="text-success small"),
+                                html.Span(" | 交易标记: ", className="fw-bold small mx-1"),
+                                html.Span(f"{len(positions_data)} 个", className="text-info small"),
+                                html.Span(" | 合并仓位: ", className="fw-bold small mx-1"),
+                                html.Span(f"{len(positions_df)} 个", className="text-primary small")
+                            ], className="d-flex align-items-center")
+                        ], width=12)
+                    ])
+                ], className="p-2 border border-secondary rounded bg-dark")
                 
                 return json.dumps(chart_data), json.dumps(positions_data), "", status_info
                 
@@ -1511,11 +1487,11 @@ def create_app():
                 logger.error(f"加载数据出错: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
-                return dash.no_update, dash.no_update, "", html.Div(f"加载数据出错: {str(e)}", className="text-danger")
+                return dash.no_update, dash.no_update, "", html.Div(f"加载数据出错: {str(e)}", className="text-danger p-2 border border-danger rounded")
         
         elif triggered_id == "reset-chart-button" and reset_clicks:
             # 发送一个空的数据集以重置图表
-            return "{}", "[]", "", html.Div("图表已重置", className="text-warning")
+            return "{}", "[]", "", html.Div("图表已重置", className="text-warning p-2 border border-warning rounded")
         
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
     
