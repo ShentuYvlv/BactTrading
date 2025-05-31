@@ -1818,13 +1818,77 @@ window.dash_clientside.clientside = {
                     
                     // 开始第一次尝试
                     addMarkerIds();
+                    
+                    // 添加标记调试信息到控制台
+                    console.log('========= 标记ID和仓位ID映射 =========');
+                    markers.forEach(marker => {
+                        console.log(`标记ID: ${marker.id}, 文本: ${marker.text}`);
+                    });
+                    console.log('========= 仓位详情映射 =========');
+                    Object.keys(positionDetailsMap).forEach(key => {
+                        const pos = positionDetailsMap[key];
+                        console.log(`键: ${key}, 仓位ID: ${pos.position_id}`);
+                    });
                 }
                 
                 // 监听十字线移动事件 - 检测标记悬停
                 priceChart.subscribeCrosshairMove(param => {
                     if (!param.point) return;
                     
-                    // 检查是否悬停在标记附近
+                    // 首先检查是否有hoveredObjectId，这通常包含标记ID
+                    if (param.hoveredObjectId) {
+                        console.log('悬停检测到hoveredObjectId:', param.hoveredObjectId);
+                        
+                        // 尝试从hoveredObjectId中提取仓位ID
+                        let positionId = null;
+                        if (param.hoveredObjectId.includes('_')) {
+                            const parts = param.hoveredObjectId.split('_');
+                            if (parts.length >= 2) {
+                                positionId = parts[0] + "_" + parts[1]; // 使用前两部分作为positionId
+                            }
+                        }
+                        
+                        if (positionId) {
+                            // 查找匹配的标记
+                            let directMarker = null;
+                            for (const marker of markers) {
+                                if (marker.id && (marker.id.includes(positionId) || positionId.includes(marker.id))) {
+                                    directMarker = marker;
+                                    break;
+                                }
+                            }
+                            
+                            // 如果找到了标记，处理它
+                            if (directMarker) {
+                                const position = positionDetailsMap[directMarker.id];
+                                if (position) {
+                                    // 高亮显示标记
+                                    document.querySelectorAll('.highlighted-marker').forEach(el => {
+                                        el.classList.remove('highlighted-marker');
+                                    });
+                                    
+                                    let markerElement = document.querySelector(`[data-marker-id="${directMarker.id}"]`);
+                                    if (markerElement) {
+                                        markerElement.classList.add('highlighted-marker');
+                                    }
+                                    
+                                    // 更新仓位导航面板中的信息
+                                    updatePositionInfoInNavigationPanel(position);
+                                    
+                                    // 确保导航面板可见
+                                    const navigationController = document.getElementById('navigation-controller');
+                                    if (navigationController) {
+                                        navigationController.style.display = 'block';
+                                        navigationController.style.opacity = '1';
+                                    }
+                                    
+                                    return; // 处理完成，直接返回
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 如果通过hoveredObjectId未找到标记，回退到原来的距离计算方法
                     let hoveredMarker = null;
                     const tolerance = 15; // 合理的容差
                     
@@ -1919,7 +1983,64 @@ window.dash_clientside.clientside = {
                     // 添加调试日志
                     console.log('图表点击事件触发:', param);
                     
-                    // 检查是否点击在标记附近
+                    // 首先检查是否有hoveredObjectId，这通常包含标记ID
+                    if (param.hoveredObjectId) {
+                        console.log('检测到hoveredObjectId:', param.hoveredObjectId);
+                        
+                        // 尝试从hoveredObjectId中提取仓位ID
+                        // 格式通常是 "Symbol_positionId_open/close"
+                        let positionId = null;
+                        if (param.hoveredObjectId.includes('_')) {
+                            const parts = param.hoveredObjectId.split('_');
+                            if (parts.length >= 2) {
+                                // 使用前两部分作为positionId，例如 "SOL/USDT:USDT_1732023119751"
+                                positionId = parts[0] + "_" + parts[1];
+                                // 或者直接使用完整ID
+                                // positionId = param.hoveredObjectId;
+                            }
+                        }
+                        
+                        if (positionId) {
+                            console.log('提取的仓位ID:', positionId);
+                            
+                            // 查找匹配的标记
+                            let directMarker = null;
+                            for (const marker of markers) {
+                                if (marker.id && (marker.id.includes(positionId) || positionId.includes(marker.id))) {
+                                    directMarker = marker;
+                                    console.log('通过ID匹配到标记:', marker);
+                                    break;
+                                }
+                            }
+                            
+                            // 如果找到了标记，处理它
+                            if (directMarker) {
+                                const position = positionDetailsMap[directMarker.id];
+                                if (position) {
+                                    console.log('通过hoveredObjectId找到仓位:', position);
+                                    
+                                    // 高亮显示标记
+                                    document.querySelectorAll('.highlighted-marker').forEach(el => {
+                                        el.classList.remove('highlighted-marker');
+                                    });
+                                    
+                                    // 更新仓位导航面板中的信息
+                                    updatePositionInfoInNavigationPanel(position);
+                                    
+                                    // 确保导航面板可见
+                                    const navigationController = document.getElementById('navigation-controller');
+                                    if (navigationController) {
+                                        navigationController.style.display = 'block';
+                                        navigationController.style.opacity = '1';
+                                    }
+                                    
+                                    return; // 处理完成，直接返回
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 如果通过hoveredObjectId未找到标记，回退到原来的距离计算方法
                     let clickedMarker = null;
                     const tolerance = 20; // 增大容差，使点击更容易被检测到
                     
