@@ -269,6 +269,19 @@ const addGlobalStyles = () => {
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             white-space: nowrap;
         }
+        
+        /* 高亮标记样式 */
+        .highlighted-marker {
+            filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.9)) !important;
+            transform: scale(1.2) !important;
+            transition: all 0.3s ease !important;
+            z-index: 1000 !important;
+        }
+        
+        .highlighted-marker text {
+            font-weight: bold !important;
+            fill: #FFEB3B !important;
+        }
     `;
     document.head.appendChild(style);
 };
@@ -740,6 +753,10 @@ window.dash_clientside.clientside = {
                 vertTouchDrag: true,
             },
         });
+
+        // 将priceChart暴露为全局变量，以便导航功能可以访问
+        window.priceChart = priceChart;
+        console.log('价格图表已创建并设置为全局变量:', window.priceChart);
         
         // 创建成交量图表
         const volumeChart = LightweightCharts.createChart(volumeContainer, {
@@ -1595,13 +1612,37 @@ window.dash_clientside.clientside = {
                     const openTime = position.open_time;
                     console.log(`仓位 ${positionId} 开仓时间:`, openTime, new Date(openTime * 1000));
                     
-                    // 创建开仓标记
+                    // 从仓位ID或交易对中提取币种名称
+                    let symbolName = '';
+                    if (position.position_id && position.position_id.includes('/')) {
+                        // 从仓位ID中提取，例如"SOL/USDT:USDT_1732201005590"
+                        symbolName = position.position_id.split('/')[0];
+                    } else if (position.symbol) {
+                        // 直接使用仓位的symbol属性
+                        symbolName = position.symbol.split('/')[0];
+                    } else {
+                        // 使用默认名称
+                        symbolName = "币种";
+                    }
+                    
+                    // 计算仓位序号 - 使用全局计数器
+                    if (!window.positionCounters) {
+                        window.positionCounters = {};
+                    }
+                    
+                    if (!window.positionCounters[symbolName]) {
+                        window.positionCounters[symbolName] = 0;
+                    }
+                    
+                    const positionIndex = ++window.positionCounters[symbolName];
+                    
+                    // 创建开仓标记 - 使用简化的文本格式
                     const openMarker = {
                         time: openTime, // 使用秒级时间戳匹配K线数据
                         position: 'belowBar',
                         color: position.side === 'long' ? '#4CAF50' : '#F44336',
                         shape: position.side === 'long' ? 'arrowUp' : 'arrowDown',
-                        text: `${positionId}开仓${position.side === 'long' ? '多' : '空'}`,
+                        text: `${symbolName} 仓位${positionIndex} {开仓${position.side === 'long' ? '多' : '空'}}`,
                         id: `${positionId}_open`,
                         size: 1.2
                     };
@@ -1618,7 +1659,7 @@ window.dash_clientside.clientside = {
                             position: 'aboveBar',
                             color: position.is_profit ? '#4CAF50' : '#F44336',
                             shape: position.side === 'long' ? 'arrowDown' : 'arrowUp',
-                            text: `${positionId}平仓${position.side === 'long' ? '多' : '空'}`,
+                            text: `${symbolName} 仓位${positionIndex} {平仓${position.side === 'long' ? '多' : '空'}}`,
                             id: `${positionId}_close`,
                             size: 1.2
                         };
@@ -2304,5 +2345,544 @@ window.dash_clientside.clientside = {
             };
             document.head.appendChild(script);
         });
+    },
+
+    // 添加导航到仓位的函数
+    navigateToPosition: function(prevClicks, nextClicks, positionsData) {
+        try {
+            // 全局缩放设置 - 保存上一次的缩放级别
+            if (typeof window.lastZoomLevel === 'undefined') {
+                window.lastZoomLevel = {
+                    barCount: 50,  // 默认显示50根K线
+                    initialized: false
+                };
+            }
+            
+            // 检查是否有仓位数据
+            if (!positionsData) {
+                console.log('没有仓位数据可用');
+                return 0;
+            }
+            
+            const positions = JSON.parse(positionsData);
+            if (!positions || positions.length === 0) {
+                console.log('解析后的仓位数据为空');
+                return 0;
+            }
+            
+            console.log(`共找到 ${positions.length} 个仓位`);
+            
+            // 检查点击事件
+            let isTriggered = false;
+            let triggerId = '';
+            
+            // 初始化存储先前点击数
+            if (typeof this.prevClicks === 'undefined') this.prevClicks = 0;
+            if (typeof this.nextClicks === 'undefined') this.nextClicks = 0;
+            
+            if (this.prevClicks !== prevClicks && prevClicks) {
+                isTriggered = true;
+                triggerId = 'prev-position-button';
+                this.prevClicks = prevClicks;
+                console.log('触发前一个仓位按钮');
+            } else if (this.nextClicks !== nextClicks && nextClicks) {
+                isTriggered = true;
+                triggerId = 'next-position-button';
+                this.nextClicks = nextClicks;
+                console.log('触发下一个仓位按钮');
+            }
+            
+            if (!isTriggered) {
+                console.log('没有检测到按钮点击事件');
+                return 0;
+            }
+            
+            // 全局变量保存当前索引
+            if (typeof window.currentPositionIndex === 'undefined') {
+                window.currentPositionIndex = 0;
+            }
+            
+            // 根据按钮更新索引
+            const oldIndex = window.currentPositionIndex;
+            if (triggerId === 'prev-position-button') {
+                window.currentPositionIndex = (window.currentPositionIndex - 1 + positions.length) % positions.length;
+            } else if (triggerId === 'next-position-button') {
+                window.currentPositionIndex = (window.currentPositionIndex + 1) % positions.length;
+            }
+            
+            console.log(`仓位索引: ${oldIndex} -> ${window.currentPositionIndex}`);
+            
+            // 获取当前仓位
+            const position = positions[window.currentPositionIndex];
+            if (!position) {
+                console.error('找不到当前索引的仓位数据');
+                return 0;
+            }
+            
+            // 获取时间戳并确保它是一个数字
+            let timestamp = position.open_time;
+            if (typeof timestamp === 'string') {
+                timestamp = parseInt(timestamp, 10);
+            }
+            
+            // 检查时间戳的有效性
+            if (!timestamp || isNaN(timestamp)) {
+                console.error('无效的时间戳:', timestamp);
+                return 0;
+            }
+            
+            // 确保时间戳格式正确 - 检查是否需要转换为秒级时间戳
+            // Lightweight Charts期望秒级时间戳
+            if (timestamp > 10000000000) {
+                // 如果是毫秒时间戳，转换为秒级
+                timestamp = Math.floor(timestamp / 1000);
+                console.log('将毫秒时间戳转换为秒级:', timestamp);
+            }
+            
+            console.log('仓位时间戳:', timestamp, '对应日期:', new Date(timestamp * 1000).toLocaleString());
+            
+            // 查找图表实例
+            const chartContainer = document.getElementById('chart-container');
+            if (!chartContainer) {
+                console.error('找不到图表容器');
+                return 0;
+            }
+            
+            // 如果已经挂载了priceChart，尝试跳转到指定时间
+            if (window.priceChart) {
+                console.log('发现priceChart全局实例，准备跳转');
+                
+                // 获取当前图表时间尺度和K线周期
+                const timeScale = window.priceChart.timeScale();
+                if (!timeScale) {
+                    console.error('无法获取时间尺度对象');
+                    return 0;
+                }
+                
+                // 获取数据源的时间精度
+                let timeFrameMinutes = 60; // 默认为1小时
+                const timeframeElement = document.getElementById('timeframe-dropdown');
+                if (timeframeElement && timeframeElement.textContent) {
+                    const tfText = timeframeElement.textContent;
+                    if (tfText.includes('1分钟')) timeFrameMinutes = 1;
+                    else if (tfText.includes('5分钟')) timeFrameMinutes = 5;
+                    else if (tfText.includes('15分钟')) timeFrameMinutes = 15;
+                    else if (tfText.includes('1小时')) timeFrameMinutes = 60;
+                    else if (tfText.includes('4小时')) timeFrameMinutes = 240;
+                    else if (tfText.includes('1天')) timeFrameMinutes = 1440;
+                }
+                
+                console.log('检测到的K线周期:', timeFrameMinutes, '分钟');
+                
+                // 保存当前的可见范围，用于维持缩放级别
+                const currentVisibleRange = timeScale.getVisibleRange();
+                const currentLogicalRange = timeScale.getVisibleLogicalRange();
+                console.log('当前可见范围:', currentVisibleRange);
+                
+                // 如果已有可见范围且是第一次跳转，记录缩放级别
+                if (currentVisibleRange && !window.lastZoomLevel.initialized && currentVisibleRange.from && currentVisibleRange.to) {
+                    const rangeDuration = currentVisibleRange.to - currentVisibleRange.from;
+                    const estimatedBarCount = rangeDuration / (timeFrameMinutes * 60);
+                    
+                    // 记录当前缩放级别
+                    window.lastZoomLevel.barCount = Math.max(20, Math.min(100, Math.round(estimatedBarCount)));
+                    window.lastZoomLevel.initialized = true;
+                    console.log('记录当前缩放级别:', window.lastZoomLevel.barCount, '根K线');
+                }
+                
+                // 使用保存的缩放级别或默认值
+                const klineCount = window.lastZoomLevel.barCount;
+                
+                // 计算前后的缓冲区时间 - 使用保存的缩放级别
+                const bufferSeconds = timeFrameMinutes * 60 * klineCount / 2; // 每个方向显示一半K线
+                
+                // 只在首次跳转或没有当前范围时设置新范围
+                const shouldSetNewRange = !currentVisibleRange || !window.lastZoomLevel.initialized;
+                
+                if (shouldSetNewRange) {
+                    const timeRange = {
+                        from: timestamp - bufferSeconds,  // 往前缓冲区
+                        to: timestamp + bufferSeconds     // 往后缓冲区
+                    };
+                    
+                    console.log('设置新的时间范围:', timeRange, '显示约', klineCount, '根K线');
+                    
+                    // 应用新的时间范围
+                    setTimeout(() => {
+                        try {
+                            console.log('应用新的时间范围...');
+                            timeScale.setVisibleRange(timeRange);
+                            
+                            // 设置后标记为已初始化
+                            window.lastZoomLevel.initialized = true;
+                        } catch (rangeErr) {
+                            console.error('设置可见范围时出错:', rangeErr);
+                        }
+                    }, 0);
+                } else {
+                    console.log('保持当前缩放级别，仅滚动到目标位置');
+                }
+                
+                // 测试时间戳是否可以转换为坐标
+                const coordinate = timeScale.timeToCoordinate(timestamp);
+                console.log('时间戳坐标:', coordinate);
+                
+                // 如果无法直接获取坐标，尝试找到最近的可用时间戳
+                if (coordinate === null) {
+                    console.log('时间戳坐标为null，尝试查找最近的可用时间点...');
+                    
+                    // 从图表获取可见的数据范围
+                    const visibleRange = timeScale.getVisibleRange();
+                    if (visibleRange) {
+                        console.log('当前可见范围:', visibleRange);
+                        
+                        // 使用固定的时间范围，无需依赖坐标转换
+                        const fixedRange = {
+                            from: timestamp - 3600 * 24, // 向前1天
+                            to: timestamp + 3600 * 24    // 向后1天
+                        };
+                        
+                        console.log('使用固定范围:', fixedRange);
+                        
+                        // 设置可见范围
+                        setTimeout(() => {
+                            try {
+                                timeScale.setVisibleRange(fixedRange);
+                                console.log('已应用固定范围');
+                            } catch (err) {
+                                console.error('设置固定范围失败:', err);
+                            }
+                        }, 0);
+                        
+                        // 处理完毕，直接返回
+                        return 0;
+                    }
+                }
+                
+                // 直接滚动到目标位置，保持当前缩放级别
+                setTimeout(() => {
+                    try {
+                        // 再次测试时间戳转换
+                        const updatedCoordinate = timeScale.timeToCoordinate(timestamp);
+                        console.log('更新后的时间坐标:', updatedCoordinate);
+                        
+                        if (updatedCoordinate !== null) {
+                            // 滚动到位置，0.5表示滚动到中心位置
+                            console.log('滚动到指定位置而不改变缩放级别...');
+                            timeScale.scrollToPosition(updatedCoordinate, 0.5);
+                        } else {
+                            console.error('无法将时间戳转换为坐标');
+                            // 尝试使用时间戳直接滚动
+                            console.log('尝试使用可见范围方法滚动...');
+                            
+                            // 获取当前的可见范围
+                            const visibleLogicalRange = timeScale.getVisibleLogicalRange();
+                            if (visibleLogicalRange) {
+                                // 计算当前显示的K线数量
+                                const visibleBars = visibleLogicalRange.to - visibleLogicalRange.from;
+                                
+                                // 使用setVisibleRange方法定位到目标时间
+                                const newRange = {
+                                    from: timestamp - (timeFrameMinutes * 60 * visibleBars / 2),
+                                    to: timestamp + (timeFrameMinutes * 60 * visibleBars / 2)
+                                };
+                                
+                                console.log('使用新的可见范围:', newRange);
+                                timeScale.setVisibleRange(newRange);
+                            } else {
+                                // 如果无法获取当前的可见逻辑范围，使用默认范围
+                                const defaultRange = {
+                                    from: timestamp - (timeFrameMinutes * 60 * 25),
+                                    to: timestamp + (timeFrameMinutes * 60 * 25)
+                                };
+                                console.log('使用默认范围:', defaultRange);
+                                timeScale.setVisibleRange(defaultRange);
+                            }
+                        }
+                        
+                        // 高亮仓位标记
+                        console.log('查找并高亮标记...');
+                        // 找到与当前位置对应的K线图元素并突出显示它
+                        const markers = document.querySelectorAll('.tv-lightweight-charts svg g text');
+                        let found = false;
+                        
+                        markers.forEach(marker => {
+                            // 移除所有之前的高亮
+                            const parent = marker.parentElement;
+                            if (parent) {
+                                parent.classList.remove('highlighted-marker');
+                            }
+                            
+                            // 检查是否是当前仓位的标记
+                            if (marker.textContent && marker.textContent.includes(`仓位${window.currentPositionIndex + 1}`)) {
+                                // 添加高亮效果
+                                if (parent) {
+                                    parent.classList.add('highlighted-marker');
+                                    found = true;
+                                    console.log('找到并高亮标记:', marker.textContent);
+                                }
+                            }
+                        });
+                        
+                        if (!found) {
+                            console.log('未找到匹配的标记元素，尝试备用查询选择器...');
+                            // 尝试更宽松的查询选择器
+                            const allTexts = document.querySelectorAll('.tv-lightweight-charts text');
+                            allTexts.forEach(text => {
+                                if (text.textContent && text.textContent.includes('仓位')) {
+                                    console.log('找到标记文本:', text.textContent);
+                                    if (text.textContent.includes(`仓位${window.currentPositionIndex + 1}`)) {
+                                        let parent = text.parentElement;
+                                        if (parent) {
+                                            parent.classList.add('highlighted-marker');
+                                            found = true;
+                                            console.log('使用备用方法高亮标记:', text.textContent);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    } catch (scrollErr) {
+                        console.error('滚动到位置时出错:', scrollErr);
+                    }
+                }, 100);
+                
+                // 更新导航信息文本
+                const positionInfoElement = document.getElementById('position-info');
+                if (positionInfoElement) {
+                    const positionTime = new Date(timestamp * 1000).toLocaleString();
+                    const positionType = position.side === 'long' ? '多头' : '空头';
+                    const profitClass = position.profit >= 0 ? 'text-success' : 'text-danger';
+                    
+                    // 提取简短的仓位ID或币种名称
+                    let symbolName = '';
+                    if (position.position_id && position.position_id.includes('/')) {
+                        symbolName = position.position_id.split('/')[0];
+                    } else if (position.symbol) {
+                        symbolName = position.symbol.split('/')[0];
+                    } else {
+                        symbolName = "币种";
+                    }
+                    
+                    positionInfoElement.innerHTML = `
+                        <div>
+                            <span class="fw-bold">${symbolName} 仓位 ${window.currentPositionIndex + 1}/${positions.length}</span>
+                        </div>
+                        <div class="small text-info d-block">${positionTime}</div>
+                        <div class="small ${profitClass} fw-bold">
+                            ${positionType} | ${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                        </div>
+                    `;
+                    
+                    console.log('已更新仓位信息面板');
+                }
+                
+                console.log('已跳转到仓位时间点:', new Date(timestamp * 1000));
+            } else {
+                console.error('找不到价格图表实例 (window.priceChart)');
+            }
+            
+            // 必须返回一个值，返回null会导致错误
+            return 0;
+        } catch (error) {
+            console.error('仓位跳转出错:', error);
+            return 0;
+        }
+    },
+    
+    // 通过编号跳转到指定仓位
+    jumpToPositionByNumber: function(jumpClicks, positionNumber, positionsData) {
+        try {
+            // 检查必要参数
+            if (!jumpClicks || !positionNumber || !positionsData) {
+                console.log('缺少必要参数，跳过跳转');
+                return 0;
+            }
+            
+            console.log(`尝试跳转到仓位编号: ${positionNumber}`);
+            
+            // 解析仓位数据
+            const positions = JSON.parse(positionsData);
+            if (!positions || positions.length === 0) {
+                console.log('没有可用的仓位数据');
+                return 0;
+            }
+            
+            // 确保编号在有效范围内
+            const targetIndex = Math.min(Math.max(1, positionNumber), positions.length) - 1;
+            
+            // 更新全局索引
+            if (typeof window.currentPositionIndex === 'undefined') {
+                window.currentPositionIndex = 0;
+            }
+            window.currentPositionIndex = targetIndex;
+            
+            console.log(`跳转到仓位索引: ${targetIndex} (仓位编号: ${targetIndex + 1})`);
+            
+            // 获取目标仓位
+            const position = positions[targetIndex];
+            if (!position) {
+                console.error('找不到指定编号的仓位');
+                return 0;
+            }
+            
+            // 获取时间戳并确保它是一个数字
+            let timestamp = position.open_time;
+            if (typeof timestamp === 'string') {
+                timestamp = parseInt(timestamp, 10);
+            }
+            
+            // 检查时间戳的有效性
+            if (!timestamp || isNaN(timestamp)) {
+                console.error('无效的时间戳:', timestamp);
+                return 0;
+            }
+            
+            // 确保时间戳格式正确 - 检查是否需要转换为秒级时间戳
+            // Lightweight Charts期望秒级时间戳
+            if (timestamp > 10000000000) {
+                // 如果是毫秒时间戳，转换为秒级
+                timestamp = Math.floor(timestamp / 1000);
+                console.log('将毫秒时间戳转换为秒级:', timestamp);
+            }
+            
+            console.log('仓位时间戳:', timestamp, '对应日期:', new Date(timestamp * 1000).toLocaleString());
+            
+            // 查找图表实例
+            if (!window.priceChart) {
+                console.error('找不到价格图表实例');
+                return 0;
+            }
+            
+            // 获取时间尺度
+            const timeScale = window.priceChart.timeScale();
+            if (!timeScale) {
+                console.error('无法获取时间尺度对象');
+                return 0;
+            }
+            
+            // 获取数据源的时间精度
+            let timeFrameMinutes = 60; // 默认为1小时
+            const timeframeElement = document.getElementById('timeframe-dropdown');
+            if (timeframeElement && timeframeElement.textContent) {
+                const tfText = timeframeElement.textContent;
+                if (tfText.includes('1分钟')) timeFrameMinutes = 1;
+                else if (tfText.includes('5分钟')) timeFrameMinutes = 5;
+                else if (tfText.includes('15分钟')) timeFrameMinutes = 15;
+                else if (tfText.includes('1小时')) timeFrameMinutes = 60;
+                else if (tfText.includes('4小时')) timeFrameMinutes = 240;
+                else if (tfText.includes('1天')) timeFrameMinutes = 1440;
+            }
+            
+            // 使用保存的缩放级别或默认值
+            const klineCount = typeof window.lastZoomLevel !== 'undefined' && window.lastZoomLevel.barCount ? 
+                window.lastZoomLevel.barCount : 50;
+            
+            // 计算缓冲区
+            const bufferSeconds = timeFrameMinutes * 60 * klineCount / 2;
+            
+            // 设置可见范围
+            const timeRange = {
+                from: timestamp - bufferSeconds,
+                to: timestamp + bufferSeconds
+            };
+            
+            console.log('设置时间范围:', timeRange);
+            
+            // 应用时间范围
+            setTimeout(() => {
+                try {
+                    timeScale.setVisibleRange(timeRange);
+                    
+                    // 高亮当前仓位标记
+                    setTimeout(() => {
+                        // 找到所有标记
+                        const markers = document.querySelectorAll('.tv-lightweight-charts svg g text');
+                        let found = false;
+                        
+                        markers.forEach(marker => {
+                            // 移除所有之前的高亮
+                            const parent = marker.parentElement;
+                            if (parent) {
+                                parent.classList.remove('highlighted-marker');
+                            }
+                            
+                            // 检查是否是当前仓位的标记
+                            if (marker.textContent && marker.textContent.includes(`仓位${targetIndex + 1}`)) {
+                                // 添加高亮效果
+                                if (parent) {
+                                    parent.classList.add('highlighted-marker');
+                                    found = true;
+                                    console.log('找到并高亮标记:', marker.textContent);
+                                }
+                            }
+                        });
+                        
+                        if (!found) {
+                            console.log('未找到匹配的标记元素，尝试备用查询选择器...');
+                            // 尝试更宽松的查询选择器
+                            const allTexts = document.querySelectorAll('.tv-lightweight-charts text');
+                            allTexts.forEach(text => {
+                                if (text.textContent && text.textContent.includes('仓位')) {
+                                    console.log('找到标记文本:', text.textContent);
+                                    if (text.textContent.includes(`仓位${targetIndex + 1}`)) {
+                                        let parent = text.parentElement;
+                                        if (parent) {
+                                            parent.classList.add('highlighted-marker');
+                                            found = true;
+                                            console.log('使用备用方法高亮标记:', text.textContent);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        
+                        // 更新导航信息文本
+                        const positionInfoElement = document.getElementById('position-info');
+                        if (positionInfoElement) {
+                            const positionTime = new Date(timestamp * 1000).toLocaleString();
+                            const positionType = position.side === 'long' ? '多头' : '空头';
+                            const profitClass = position.profit >= 0 ? 'text-success' : 'text-danger';
+                            
+                            // 提取简短的仓位ID或币种名称
+                            let symbolName = '';
+                            if (position.position_id && position.position_id.includes('/')) {
+                                symbolName = position.position_id.split('/')[0];
+                            } else if (position.symbol) {
+                                symbolName = position.symbol.split('/')[0];
+                            } else {
+                                symbolName = "币种";
+                            }
+                            
+                            positionInfoElement.innerHTML = `
+                                <div>
+                                    <span class="fw-bold">${symbolName} 仓位 ${targetIndex + 1}/${positions.length}</span>
+                                </div>
+                                <div class="small text-info d-block">${positionTime}</div>
+                                <div class="small ${profitClass} fw-bold">
+                                    ${positionType} | ${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                                </div>
+                            `;
+                            
+                            console.log('已更新仓位信息面板');
+                        }
+                    }, 100);
+                } catch (error) {
+                    console.error('应用时间范围时出错:', error);
+                }
+            }, 0);
+            
+            // 清空输入框
+            const inputElement = document.getElementById('position-number-input');
+            if (inputElement) {
+                inputElement.value = '';
+            }
+            
+            console.log('已完成跳转处理');
+            return 0;
+        } catch (error) {
+            console.error('编号跳转出错:', error);
+            return 0;
+        }
     }
 }; 

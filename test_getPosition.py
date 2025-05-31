@@ -521,8 +521,8 @@ def main():
         exchange = initialize_exchange()
         
         # 设置时间范围
-        start_date = '2024-07-01'
-        end_date = '2025-05-30'
+        start_date = '2024-04-01'
+        end_date = '2024-05-30'
         
         # 设置线程数（可根据需要调整，建议5-10个）
         max_workers = 6  # 减少线程数避免触发频率限制

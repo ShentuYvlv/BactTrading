@@ -72,6 +72,106 @@ def load_symbols_from_csv(csv_file_path, min_trades=5):
         logger.error(traceback.format_exc())
         return {}
 
+# 添加函数：直接从CSV加载仓位数据
+def load_positions_from_csv(csv_file_path, symbol=None):
+    """从CSV文件中直接加载仓位数据
+    
+    Args:
+        csv_file_path (str): CSV文件路径
+        symbol (str, optional): 过滤指定交易对的仓位，如果为None则加载所有仓位
+        
+    Returns:
+        list: 仓位数据列表，格式适合图表标记使用
+    """
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(csv_file_path):
+            logger.error(f"CSV文件不存在: {csv_file_path}")
+            return []
+        
+        # 读取CSV文件
+        df = pd.read_csv(csv_file_path)
+        logger.info(f"成功读取CSV仓位文件，共 {len(df)} 条记录")
+        
+        # 检查必要的列是否存在
+        required_columns = ['仓位ID', '交易对', '方向', '数量', '开仓价格', '开仓时间', 
+                           '平仓价格', '平仓时间', 'PnL', '原始开仓时间戳', '原始平仓时间戳']
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.warning(f"CSV文件缺少列: {missing_columns}，将尝试使用可用列")
+        
+        # 如果指定了交易对，过滤数据
+        if symbol:
+            df = df[df['交易对'] == symbol]
+            logger.info(f"过滤 {symbol} 的仓位数据，剩余 {len(df)} 条记录")
+        
+        if df.empty:
+            logger.warning(f"没有找到符合条件的仓位数据")
+            return []
+        
+        # 转换为适合图表标记的格式
+        positions_data = []
+        
+        for _, row in df.iterrows():
+            try:
+                # 处理方向
+                side = 'long' if row['方向'] == '多头' else 'short'
+                
+                # 处理时间戳 - 优先使用原始时间戳
+                if 'original_open_time' in row and pd.notna(row['原始开仓时间戳']):
+                    open_timestamp = int(row['原始开仓时间戳']) // 1000  # 转换为秒级时间戳
+                else:
+                    # 否则尝试解析时间字符串
+                    open_timestamp = int(pd.to_datetime(row['开仓时间']).timestamp())
+                
+                # 处理平仓时间
+                if '状态' in row and row['状态'] != '已平仓':
+                    # 未平仓的仓位
+                    close_timestamp = None
+                    close_time_formatted = '持仓中'
+                elif 'original_close_time' in row and pd.notna(row['原始平仓时间戳']):
+                    close_timestamp = int(row['原始平仓时间戳']) // 1000  # 转换为秒级时间戳
+                    close_time_formatted = row['平仓时间']
+                else:
+                    # 尝试解析时间字符串
+                    close_timestamp = int(pd.to_datetime(row['平仓时间']).timestamp()) if pd.notna(row['平仓时间']) else None
+                    close_time_formatted = row['平仓时间'] if pd.notna(row['平仓时间']) else '持仓中'
+                
+                # 计算是否盈利
+                profit = float(row['PnL']) if pd.notna(row['PnL']) else 0
+                is_profit = profit >= 0
+                
+                # 创建仓位数据对象
+                position_data = {
+                    'position_id': str(row['仓位ID']) if '仓位ID' in row else f"pos-{_}",
+                    'side': side,
+                    'open_time': open_timestamp,
+                    'close_time': close_timestamp,
+                    'open_price': float(row['开仓价格']),
+                    'close_price': float(row['平仓价格']) if pd.notna(row['平仓价格']) else None,
+                    'amount': float(row['数量']) if pd.notna(row['数量']) else 0,
+                    'profit': profit,
+                    'open_time_formatted': row['开仓时间'],
+                    'close_time_formatted': close_time_formatted,
+                    'is_profit': is_profit,
+                    'is_open': close_timestamp is None
+                }
+                
+                positions_data.append(position_data)
+            except Exception as e:
+                logger.error(f"处理仓位行数据时出错: {str(e)}, 行: {row}")
+                continue
+        
+        logger.info(f"成功加载 {len(positions_data)} 个仓位数据")
+        return positions_data
+    
+    except Exception as e:
+        logger.error(f"加载仓位数据时发生错误: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -981,6 +1081,22 @@ def create_app():
                             makeElementDraggable(navigationController);
                             console.log('已添加导航控制器拖动功能');
                         }
+                        
+                        // 为仓位编号输入框添加回车键监听
+                        const positionInput = document.getElementById('position-number-input');
+                        if (positionInput) {
+                            positionInput.addEventListener('keydown', function(e) {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    // 触发跳转按钮点击
+                                    const jumpButton = document.getElementById('jump-to-position-button');
+                                    if (jumpButton) {
+                                        jumpButton.click();
+                                    }
+                                }
+                            });
+                            console.log('已添加仓位编号输入框回车键监听');
+                        }
                     }, 500);
                 });
             </script>
@@ -1290,6 +1406,33 @@ def create_app():
                     color: rgba(255, 255, 255, 0.8);
                 }
                 
+                /* 加载指示器样式 */
+                .symbol-item.loading {
+                    position: relative;
+                }
+                
+                .loading-indicator {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(19, 23, 34, 0.9);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-size: 10px;
+                    color: #fff;
+                    border-radius: 6px;
+                    animation: pulse 1.5s infinite;
+                }
+                
+                @keyframes pulse {
+                    0% { opacity: 0.6; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.6; }
+                }
+                
                 /* 导航控制器样式 */
                 #navigation-controller {
                     position: fixed;
@@ -1334,6 +1477,36 @@ def create_app():
                     display: flex;
                     flex-direction: column;
                     gap: 8px;
+                }
+                
+                /* 修改高亮标记样式 - 适用于TradingView Lightweight Charts 4.0.1版本 */
+                .highlighted-marker {
+                    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.9)) !important;
+                    transform: scale(1.3) !important;
+                    transition: all 0.3s ease !important;
+                    z-index: 1000 !important;
+                }
+                
+                .highlighted-marker text {
+                    fill: #FFEB3B !important; 
+                    font-weight: bold !important;
+                    text-shadow: 0px 0px 4px rgba(0, 0, 0, 0.7) !important;
+                }
+                
+                .highlighted-marker path {
+                    stroke: #FFD700 !important; 
+                    stroke-width: 2px !important;
+                }
+                
+                /* 添加一个动画效果 */
+                @keyframes markerPulse {
+                    0% { transform: scale(1.2); }
+                    50% { transform: scale(1.4); }
+                    100% { transform: scale(1.2); }
+                }
+                
+                .highlighted-marker {
+                    animation: markerPulse 1.5s infinite ease-in-out !important;
                 }
                 
                 /* 响应式调整 */
@@ -1390,8 +1563,39 @@ def create_app():
                 title=f"{symbol} - 交易次数: {count}")
         )
     
+    # 添加客户端脚本，处理币种选择项的点击事件
+    symbol_item_click_js = """
+    function symbolItemClick() {
+        // 获取所有币种选择项
+        const symbolItems = document.querySelectorAll('.symbol-item');
+        
+        // 为每个币种选择项添加点击事件
+        symbolItems.forEach(item => {
+            item.addEventListener('click', function() {
+                // 移除所有项的active类
+                symbolItems.forEach(i => i.classList.remove('active'));
+                
+                // 为当前点击项添加active类
+                this.classList.add('active');
+                
+                // 添加加载中样式
+                this.classList.add('loading');
+                this.innerHTML += '<div class="loading-indicator">加载中...</div>';
+                
+                // 点击事件由Dash回调处理
+            });
+        });
+    }
+    
+    // 页面加载完成后执行
+    document.addEventListener('DOMContentLoaded', symbolItemClick);
+    """
+    
     # 应用布局
     app.layout = dbc.Container([
+        # 添加客户端脚本
+        html.Script(symbol_item_click_js),
+        
         # 币种选择卡片
         dbc.Card([
             dbc.CardBody([
@@ -1601,6 +1805,31 @@ def create_app():
                         html.Div(id="position-info", className="mb-2 text-center small")
                     ], width=12),
                     
+                    # 添加编号输入框和跳转按钮
+                    dbc.Col([
+                        dbc.InputGroup(
+                            [
+                                dbc.Input(
+                                    id="position-number-input",
+                                    type="number",
+                                    placeholder="编号",
+                                    min=1,
+                                    step=1,
+                                    size="sm"
+                                ),
+                                dbc.Button(
+                                    "跳转",
+                                    id="jump-to-position-button",
+                                    color="info",
+                                    size="sm",
+                                    className="px-2"
+                                ),
+                            ],
+                            size="sm",
+                            className="mb-2"
+                        ),
+                    ], width=12),
+                    
                     dbc.Col([
                         dbc.Button("上一个", id="prev-position-button", color="secondary", size="sm", className="w-100 mb-2")
                     ], width=12),
@@ -1662,15 +1891,16 @@ def create_app():
 
     # 加载数据回调
     @app.callback(
-        [Output("chart-data-store", "data"), 
-         Output("trades-data-store", "data"),
-         Output("loading-spinner", "children"),
-         Output("status-info", "children")],
+        [Output("chart-data-store", "data", allow_duplicate=True), 
+         Output("trades-data-store", "data", allow_duplicate=True),
+         Output("loading-spinner", "children", allow_duplicate=True),
+         Output("status-info", "children", allow_duplicate=True)],
         [Input("load-data-button", "n_clicks"), Input("reset-chart-button", "n_clicks")],
         [State("symbol-input", "value"), 
          State("timeframe-dropdown", "value"),
          State("start-date-picker", "date"),
-         State("end-date-picker", "date")]
+         State("end-date-picker", "date")],
+        prevent_initial_call=True
     )
     def load_chart_data(load_clicks, reset_clicks, symbol, timeframe, start_date, end_date):
         triggered_id = dash.callback_context.triggered[0]["prop_id"].split(".")[0]
@@ -1828,10 +2058,12 @@ def create_app():
     @app.callback(
         [Output("position-info", "children")],
         [Input("prev-position-button", "n_clicks"),
-         Input("next-position-button", "n_clicks")],
-        [State("trades-data-store", "data")]
+         Input("next-position-button", "n_clicks"),
+         Input("jump-to-position-button", "n_clicks")],
+        [State("position-number-input", "value"),
+         State("trades-data-store", "data")]
     )
-    def navigate_positions(prev_clicks, next_clicks, positions_json):
+    def navigate_positions(prev_clicks, next_clicks, jump_clicks, position_number, positions_json):
         ctx = dash.callback_context
         if not ctx.triggered:
             return [html.Div("请先加载数据", className="text-muted small")]
@@ -1856,6 +2088,10 @@ def create_app():
                 navigate_positions.current_index = (navigate_positions.current_index - 1) % len(positions)
             elif trigger_id == "next-position-button" and next_clicks:
                 navigate_positions.current_index = (navigate_positions.current_index + 1) % len(positions)
+            elif trigger_id == "jump-to-position-button" and jump_clicks and position_number:
+                # 确保编号在有效范围内（1到positions.length）
+                target_index = max(1, min(int(position_number), len(positions))) - 1
+                navigate_positions.current_index = target_index
             
             # 获取当前仓位
             current_position = positions[navigate_positions.current_index]
@@ -1889,69 +2125,171 @@ def create_app():
             logger.error(traceback.format_exc())
             return [html.Div(f"导航出错: {str(e)}", className="text-danger small")]
     
-    # 添加客户端脚本来实现仓位跳转
+    # 修改客户端回调，使用正确的命名空间和添加新函数到clientside命名空间
     app.clientside_callback(
-        """
-        function(prevClicks, nextClicks, positionsData) {
-            const ctx = window.dash_clientside.callback_context;
-            if (!ctx.triggered.length) return;
-            
-            const triggerId = ctx.triggered[0].prop_id.split('.')[0];
-            
-            try {
-                // 检查是否有仓位数据
-                if (!positionsData) return;
-                
-                const positions = JSON.parse(positionsData);
-                if (!positions || positions.length === 0) return;
-                
-                // 全局变量保存当前索引
-                if (typeof window.currentPositionIndex === 'undefined') {
-                    window.currentPositionIndex = 0;
-                }
-                
-                // 根据按钮更新索引
-                if (triggerId === 'prev-position-button' && prevClicks) {
-                    window.currentPositionIndex = (window.currentPositionIndex - 1 + positions.length) % positions.length;
-                } else if (triggerId === 'next-position-button' && nextClicks) {
-                    window.currentPositionIndex = (window.currentPositionIndex + 1) % positions.length;
-                }
-                
-                // 获取当前仓位
-                const position = positions[window.currentPositionIndex];
-                if (!position) return;
-                
-                // 获取时间戳
-                const timestamp = position.open_time;
-                if (!timestamp) return;
-                
-                // 查找图表实例
-                const chartContainer = document.getElementById('chart-container');
-                if (!chartContainer) return;
-                
-                // 如果已经挂载了priceChart，尝试跳转到指定时间
-                if (window.priceChart) {
-                    // 设置可见范围
-                    const timeRange = {
-                        from: timestamp - 3600 * 24,  // 往前1天
-                        to: timestamp + 3600 * 24     // 往后1天
-                    };
-                    
-                    window.priceChart.timeScale().setVisibleRange(timeRange);
-                    console.log('已跳转到仓位时间点:', new Date(timestamp * 1000));
-                }
-                
-                return true;
-            } catch (error) {
-                console.error('仓位跳转出错:', error);
-                return false;
-            }
-        }
-        """,
-        Output("chart-container", "n_clicks", allow_duplicate=True),
+        ClientsideFunction(namespace="clientside", function_name="navigateToPosition"),
+        Output("chart-container", "n_clicks", allow_duplicate=True),  # 使用一个不重要的属性
         [Input("prev-position-button", "n_clicks"),
          Input("next-position-button", "n_clicks")],
         [State("trades-data-store", "data")],
+        prevent_initial_call=True
+    )
+    
+    # 添加编号输入跳转功能
+    app.clientside_callback(
+        ClientsideFunction(namespace="clientside", function_name="jumpToPositionByNumber"),
+        Output("chart-container", "n_clicks", allow_duplicate=True),  # 使用一个不重要的属性
+        [Input("jump-to-position-button", "n_clicks")],
+        [State("position-number-input", "value"),
+         State("trades-data-store", "data")],
+        prevent_initial_call=True
+    )
+    
+    # 币种点击加载数据回调
+    @app.callback(
+        [Output("chart-data-store", "data", allow_duplicate=True), 
+         Output("trades-data-store", "data", allow_duplicate=True),
+         Output("loading-spinner", "children", allow_duplicate=True),
+         Output("status-info", "children", allow_duplicate=True),
+         Output("symbol-input", "value"),  # 更新交易对输入框
+         Output("start-date-picker", "date"),  # 更新开始日期
+         Output("end-date-picker", "date"),  # 更新结束日期
+         Output("timeframe-dropdown", "value")],  # 更新周期选择器
+        [Input(f"symbol-{symbol.replace('/', '-').replace(':', '_')}", "n_clicks") for symbol in symbols_data.keys()],
+        prevent_initial_call=True
+    )
+    def load_data_from_symbol_click(*args):
+        """处理币种点击事件，加载数据"""
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return [dash.no_update] * 8
+        
+        # 获取被点击的组件ID
+        triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        # 从组件ID中提取币种
+        if triggered_id.startswith('symbol-'):
+            symbol_str = triggered_id.replace('symbol-', '').replace('-', '/').replace('_', ':')
+            clicked_symbol = symbol_str
+        else:
+            return [dash.no_update] * 8
+        
+        logger.info(f"币种 {clicked_symbol} 被点击，开始加载数据...")
+        
+        try:
+            # 设置默认的日期范围（2024.7-2025.5）
+            default_start_date = datetime(2024, 11, 20)
+            default_end_date = datetime(2025, 5, 30)
+            
+            # 设置默认的K线周期
+            default_timeframe = '15m'
+            
+            # 转换为时间戳（毫秒）
+            since = int(default_start_date.timestamp() * 1000)
+            until = int(default_end_date.timestamp() * 1000)
+            
+            # 创建人类可读的时间范围字符串
+            since_str = default_start_date.strftime('%Y-%m-%d %H:%M:%S')
+            until_str = default_end_date.strftime('%Y-%m-%d %H:%M:%S')
+            time_range_str = f"{since_str} 至 {until_str}"
+            
+            # 显示加载中状态
+            loading_status = html.Div("正在加载数据，请稍候...", className="text-warning p-2 border border-warning rounded")
+            
+            # 获取K线数据 - 使用5分钟周期
+            df = fetch_ohlcv_data(exchange, clicked_symbol, default_timeframe, since, until)
+            
+            if df.empty:
+                return (
+                    dash.no_update, 
+                    dash.no_update, 
+                    "", 
+                    html.Div(f"无法加载 {clicked_symbol} 的K线数据", className="text-danger p-2 border border-danger rounded"),
+                    clicked_symbol,
+                    default_start_date.date(),
+                    default_end_date.date(),
+                    default_timeframe
+                )
+            
+            # 准备图表数据
+            chart_data = prepare_data_for_chart(df)
+            
+            # 从CSV直接加载仓位数据
+            csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
+            positions_data = load_positions_from_csv(csv_file_path, symbol=clicked_symbol)
+            
+            # 返回更美观的状态信息
+            status_info = html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span("币种: ", className="fw-bold small"),
+                            html.Span(f"{clicked_symbol}", className="text-success small"),
+                            html.Span(" | 时间范围: ", className="fw-bold small mx-1"),
+                            html.Span(f"{time_range_str}", className="text-warning small")
+                        ], className="d-flex align-items-center mb-1")
+                    ], width=12),
+                    dbc.Col([
+                        html.Div([
+                            html.Span("K线数据: ", className="fw-bold small me-1"),
+                            html.Span(f"{len(df)} 条", className="text-success small"),
+                            html.Span(" | 仓位标记: ", className="fw-bold small mx-1"),
+                            html.Span(f"{len(positions_data)} 个", className="text-info small")
+                        ], className="d-flex align-items-center")
+                    ], width=12)
+                ])
+            ], className="p-2 border border-secondary rounded bg-dark")
+            
+            return (
+                json.dumps(chart_data), 
+                json.dumps(positions_data), 
+                "", 
+                status_info, 
+                clicked_symbol,
+                default_start_date.date(),
+                default_end_date.date(),
+                default_timeframe
+            )
+            
+        except Exception as e:
+            logger.error(f"币种点击加载数据出错: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return (
+                dash.no_update, 
+                dash.no_update, 
+                "", 
+                html.Div(f"加载数据出错: {str(e)}", className="text-danger p-2 border border-danger rounded"),
+                clicked_symbol if clicked_symbol else dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update
+            )
+    
+    # 清除币种加载状态的客户端回调
+    app.clientside_callback(
+        """
+        function(chartData, tradesData) {
+            // 在数据加载完成后，清除所有加载指示器
+            if (chartData || tradesData) {
+                setTimeout(() => {
+                    const loadingItems = document.querySelectorAll('.symbol-item.loading');
+                    loadingItems.forEach(item => {
+                        item.classList.remove('loading');
+                        // 移除加载中文字
+                        const indicator = item.querySelector('.loading-indicator');
+                        if (indicator) {
+                            indicator.remove();
+                        }
+                    });
+                }, 500);
+            }
+            return null;
+        }
+        """,
+        Output("symbol-grid", "title"),  # 使用一个不影响UI的属性
+        [Input("chart-data-store", "data"),
+         Input("trades-data-store", "data")],
         prevent_initial_call=True
     )
     
