@@ -95,15 +95,15 @@ const createLegend = (chart, container, items) => {
 // 添加自定义的鼠标交互处理
 const addChartInteractions = (chartInstance, containerElement, isMainChart = false) => {
     // 鼠标滚轮事件 - 缩放图表
-    /* containerElement.addEventListener('wheel', (e) => {
+    containerElement.addEventListener('wheel', (e) => {
         e.preventDefault(); // 阻止页面滚动
         
         // 获取鼠标位置相对于容器的坐标
         const rect = containerElement.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         
-        // 检查鼠标是否在价格轴上 (假设价格轴在右侧，宽度约为50px)
-        const isPriceAxisArea = mouseX > rect.width - 50;
+        // 检查鼠标是否在价格轴上 (假设价格轴在左侧，宽度约为50px)
+        const isPriceAxisArea = mouseX < 50;
         
         if (isPriceAxisArea) {
             // 鼠标在价格轴上，控制价格缩放
@@ -113,16 +113,16 @@ const addChartInteractions = (chartInstance, containerElement, isMainChart = fal
             // 鼠标在图表主体上，控制时间轴缩放（默认行为）
             // chartInstance.timeScale().scrollPosition(chartInstance.timeScale().scrollPosition() - e.deltaY / 100);
         }
-    }, { passive: false }); */
+    }, { passive: false });
 
     // 添加双击重置功能
     containerElement.addEventListener('dblclick', (e) => {
         const rect = containerElement.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         
-        if (mouseX > rect.width - 50) {
+        if (mouseX < 50) {
             // 双击价格轴，重置价格范围
-            const priceScale = chartInstance.priceScale('right');
+            const priceScale = chartInstance.priceScale('left');
             if (priceScale) {
                 priceScale.applyOptions({
                     autoScale: true
@@ -471,7 +471,7 @@ window.dash_clientside.clientside = {
         volumeContainer.style.width = '100%';
         volumeContainer.style.height = 'calc(30% - 5px)';
         volumeContainer.style.position = 'relative';
-        volumeContainer.style.marginTop = '0px';
+        volumeContainer.style.marginTop = '-25px';
         
         // 创建分隔线，可拖动
         const dividerContainer = document.createElement('div');
@@ -740,12 +740,18 @@ window.dash_clientside.clientside = {
                 allowEndOfTimeScaleVisibility: false, // 不允许时间轴末端的可见性，防止自动缩放
                 rightBarStaysOnScroll: true, // 滚动时保持右侧柱形不变
             },
-            rightPriceScale: {
+            leftPriceScale: {
                 borderColor: '#2B2B43',
                 scaleMargins: {
                     top: 0.1,
                     bottom: 0.1,
                 },
+                visible: true,
+                borderVisible: true,
+            },
+            rightPriceScale: {
+                borderColor: '#2B2B43',
+                visible: false, // 隐藏右侧价格轴
             },
             handleScroll: {
                 mouseWheel: true,
@@ -815,8 +821,8 @@ window.dash_clientside.clientside = {
                 ...commonChartOptions.timeScale,
                 visible: true,
             },
-            rightPriceScale: {
-                ...commonChartOptions.rightPriceScale,
+            leftPriceScale: {
+                ...commonChartOptions.leftPriceScale,
                 scaleMargins: {
                     top: 0.2,
                     bottom: 0.2,
@@ -856,6 +862,7 @@ window.dash_clientside.clientside = {
             priceLineStyle: LightweightCharts.LineStyle.Dashed,
             lastValueVisible: true,
             title: '价格',
+            priceScaleId: 'left',  // 指定使用左侧价格轴
         });
         
         // 设置K线数据
@@ -869,7 +876,7 @@ window.dash_clientside.clientside = {
                 precision: 2,
                 minMove: 0.01,
             },
-            priceScaleId: 'volume',
+            priceScaleId: 'left',  // 改为使用左侧价格轴
             title: '成交量',
         });
         
@@ -894,6 +901,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: true,
                 title: 'EMA20',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             emaSeries.setData(chartData.ema20);
         }
@@ -914,6 +922,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: false,
                 title: '上轨',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             upperBandSeries.setData(chartData.upper_band);
             
@@ -925,6 +934,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: false,
                 title: '中轨',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             middleBandSeries.setData(chartData.middle_band);
             
@@ -936,6 +946,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: false,
                 title: '下轨',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             lowerBandSeries.setData(chartData.lower_band);
         }
@@ -953,8 +964,8 @@ window.dash_clientside.clientside = {
                     ...commonChartOptions.timeScale,
                     visible: true,
                 },
-                rightPriceScale: {
-                    ...commonChartOptions.rightPriceScale,
+                leftPriceScale: {
+                    ...commonChartOptions.leftPriceScale,
                     scaleMargins: {
                         top: 0.1,
                         bottom: 0.1,
@@ -983,6 +994,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: true,
                 title: 'RSI(14)',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             rsiSeries.setData(chartData.rsi);
             
@@ -993,6 +1005,7 @@ window.dash_clientside.clientside = {
                 lineStyle: LightweightCharts.LineStyle.Dashed,
                 priceLineVisible: false,
                 lastValueVisible: false,
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             
             const rsiOversold = rsiChart.addLineSeries({
@@ -1001,6 +1014,7 @@ window.dash_clientside.clientside = {
                 lineStyle: LightweightCharts.LineStyle.Dashed,
                 priceLineVisible: false,
                 lastValueVisible: false,
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             
             // 设置超买超卖线的数据
@@ -1036,8 +1050,8 @@ window.dash_clientside.clientside = {
                     ...commonChartOptions.timeScale,
                     visible: true,
                 },
-                rightPriceScale: {
-                    ...commonChartOptions.rightPriceScale,
+                leftPriceScale: {
+                    ...commonChartOptions.leftPriceScale,
                     scaleMargins: {
                         top: 0.1,
                         bottom: 0.1,
@@ -1066,6 +1080,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: true,
                 title: 'MACD',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             macdLineSeries.setData(chartData.macd);
             
@@ -1076,6 +1091,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: true,
                 title: '信号线',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             signalLineSeries.setData(chartData.signal);
             
@@ -1089,6 +1105,7 @@ window.dash_clientside.clientside = {
                 priceLineVisible: false,
                 lastValueVisible: false,
                 title: '直方图',
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             
             // 为直方图添加颜色
@@ -1107,6 +1124,7 @@ window.dash_clientside.clientside = {
                 lineStyle: LightweightCharts.LineStyle.Dashed,
                 priceLineVisible: false,
                 lastValueVisible: false,
+                priceScaleId: 'left', // 指定使用左侧价格轴
             });
             
             // 设置零线数据
@@ -1567,7 +1585,7 @@ window.dash_clientside.clientside = {
                 const allButtons = document.querySelectorAll('.fullscreen-button');
                 allButtons.forEach(btn => {
                     if (isFullscreen) {
-                        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" fill="currentColor"/></svg>';
+                        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>';
                     } else {
                         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>';
                     }
@@ -1740,95 +1758,18 @@ window.dash_clientside.clientside = {
                 
                     // 延迟为标记添加data-marker-id属性，确保DOM元素已创建
                     // 增加延迟时间，并使用多次尝试的策略
-                    const addMarkerIds = (retryCount = 0, maxRetries = 5) => {
+                    const addMarkerIds = () => {
                         setTimeout(() => {
-                            try {
-                                // 尝试多种选择器来查找标记元素
-                                let markerElements = document.querySelectorAll('.tv-lightweight-charts svg g text');
-                                if (markerElements.length === 0) {
-                                    // 备用选择器
-                                    markerElements = document.querySelectorAll('.tv-lightweight-charts text');
-                                }
-                                
-                                if (markerElements.length === 0) {
-                                    console.log(`未找到标记元素，尝试 ${retryCount + 1}/${maxRetries}`);
-                                    // 如果没有找到元素且还有重试次数，则重试
-                                    if (retryCount < maxRetries) {
-                                        addMarkerIds(retryCount + 1, maxRetries);
-                                    }
-                                    return;
-                                }
-                                
-                                console.log(`找到 ${markerElements.length} 个可能的标记元素`);
-                                
-                                // 记录找到的匹配
-                                let matchCount = 0;
-                                
-                                // 为标记元素添加data-marker-id属性
-                                markerElements.forEach(markerElement => {
-                                    const text = markerElement.textContent || '';
-                                    
-                                    // 查找匹配的标记 - 使用更灵活的匹配策略
-                                    for (const marker of markers) {
-                                        // 提取标记文本中的关键部分进行匹配，如币种和仓位编号
-                                        const markerTextParts = marker.text.split(' ');
-                                        const symbolPart = markerTextParts[0]; // 币种名称
-                                        const positionPart = markerTextParts[1]; // 仓位编号
-                                        
-                                        // 如果文本包含关键部分，认为是匹配的
-                                        if (text.includes(symbolPart) && text.includes(positionPart)) {
-                                            // 找到父元素并添加data-marker-id属性
-                                            // 尝试多级父元素
-                                            let parent = markerElement.parentElement;
-                                            let attempts = 0;
-                                            while (parent && attempts < 3) {
-                                                parent.setAttribute('data-marker-id', marker.id);
-                                                // 也为文本元素本身添加ID，增加查找成功率
-                                                markerElement.setAttribute('data-marker-id', marker.id);
-                                                // 在控制台输出详细信息，帮助调试
-                                                console.log(`为标记添加ID: ${marker.id}, 文本: "${text.substring(0, 30)}..."`);
-                                                matchCount++;
-                                                // 修复逻辑问题：移除这里的break，正确使用循环
-                                                
-                                                // 尝试上一级父元素
-                                                parent = parent.parentElement;
-                                                attempts++;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                });
-                                
-                                console.log(`成功为 ${matchCount} 个标记元素添加data-marker-id属性`);
-                                
-                                // 如果匹配数为0但还有重试次数，尝试再次重试
-                                if (matchCount === 0 && retryCount < maxRetries) {
-                                    console.log(`没有匹配到标记，将在${(retryCount + 1) * 500}ms后重试...`);
-                                    addMarkerIds(retryCount + 1, maxRetries);
-                                }
-                            } catch (e) {
-                                console.error('为标记添加属性时出错:', e);
-                                // 出错后也尝试重试
-                                if (retryCount < maxRetries) {
-                                    addMarkerIds(retryCount + 1, maxRetries);
-                                }
-                            }
-                        }, 500 * (retryCount + 1)); // 逐渐增加延迟时间
+                            // 简化实现，只记录标记数量，不再查找和处理DOM元素
+                            console.log(`已添加 ${markers.length} 个标记到K线图`);
+                        }, 100);
                     };
                     
                     // 开始第一次尝试
                     addMarkerIds();
                     
-                    // 添加标记调试信息到控制台
-                    console.log('========= 标记ID和仓位ID映射 =========');
-                    markers.forEach(marker => {
-                        console.log(`标记ID: ${marker.id}, 文本: ${marker.text}`);
-                    });
-                    console.log('========= 仓位详情映射 =========');
-                    Object.keys(positionDetailsMap).forEach(key => {
-                        const pos = positionDetailsMap[key];
-                        console.log(`键: ${key}, 仓位ID: ${pos.position_id}`);
-                    });
+                    // 添加基本标记信息到控制台
+                    console.log(`总计添加了 ${markers.length} 个标记`);
                 }
                 
                 // 监听十字线移动事件 - 检测标记悬停
@@ -2150,11 +2091,34 @@ window.dash_clientside.clientside = {
                         symbolName = "币种";
                     }
                     
+                    // 查找当前仓位的序号
+                    let positionIndex = 0;
+                    
+                    // 方法1：从标记中查找序号信息
+                    for (const marker of markers) {
+                        if (marker.id && marker.id.includes(position.position_id)) {
+                            // 标记文本格式为 "SOL 仓位1 {开仓多}"，提取仓位序号
+                            const match = marker.text.match(/仓位(\d+)/);
+                            if (match && match[1]) {
+                                positionIndex = parseInt(match[1], 10);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 方法2：如果未找到，使用全局仓位计数器的当前值
+                    if (positionIndex === 0 && window.positionCounters && symbolName) {
+                        positionIndex = window.positionCounters[symbolName] || 1;
+                    }
+                    
+                    // 如果仍未找到序号，使用默认值
+                    const positionIndexText = positionIndex > 0 ? `#${positionIndex}` : '';
+                    
                     // 构建详细的仓位信息HTML
                     positionInfoElement.innerHTML = `
                         <div class="p-2 mb-2" style="background: ${position.profit >= 0 ? 'rgba(38, 166, 154, 0.1)' : 'rgba(239, 83, 80, 0.1)'}; border-radius: 6px;">
                             <div class="d-flex justify-content-between align-items-center mb-1">
-                                <span class="fw-bold">${symbolName}</span>
+                                <span class="fw-bold">${symbolName} ${positionIndexText}</span>
                                 <span class="${profitClass} fw-bold">${positionType}</span>
                                         </div>
                             <div class="small text-info">${position.open_time_formatted}</div>
@@ -2170,8 +2134,8 @@ window.dash_clientside.clientside = {
                                 <div class="d-flex justify-content-between align-items-center mt-1">
                                     <span class="small text-muted">利润:</span>
                                     <span class="${profitClass} fw-bold">${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}</span>
-                                        </div>
-                                    ` : `
+                                </div>
+                            ` : `
                                 <div class="text-warning text-center small fw-bold mt-1">
                                     持仓中
                                         </div>
@@ -2235,6 +2199,83 @@ window.dash_clientside.clientside = {
                 ratioLabel.textContent = `${mainChartPercentage}/${volumePercentage}/${indicatorPercentage}`;
             }
         };
+        
+        // 添加键盘箭头控制图表移动的功能
+        const setupKeyboardNavigation = () => {
+            // 防止重复添加事件监听器
+            if (window.keyboardNavigationSetup) return;
+            
+            // 添加键盘事件监听
+            document.addEventListener('keydown', (event) => {
+                // 检查是否有活动的图表实例
+                if (!window.priceChart) return;
+                
+                // 检查是否在输入框中输入 - 如果是则不处理键盘事件
+                if (document.activeElement.tagName === 'INPUT' || 
+                    document.activeElement.tagName === 'TEXTAREA' || 
+                    document.activeElement.isContentEditable) {
+                    return;
+                }
+                
+                // 获取时间轴对象
+                const timeScale = window.priceChart.timeScale();
+                if (!timeScale) return;
+                
+                // 获取当前可见的逻辑范围
+                const logicalRange = timeScale.getVisibleLogicalRange();
+                if (!logicalRange) return;
+                
+                // 定义移动速度 - 每次移动的K线数量
+                const moveSpeed = 1; // 改为1，每次只移动一根K线
+                
+                // 处理左右箭头键
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        // 向左移动图表
+                        const newRangeLeft = {
+                            from: logicalRange.from - moveSpeed,
+                            to: logicalRange.to - moveSpeed
+                        };
+                        timeScale.setVisibleLogicalRange(newRangeLeft);
+                        
+                        // 同步其他图表
+                        if (typeof window.forceSyncAllCharts === 'function') {
+                            setTimeout(() => window.forceSyncAllCharts(), 0);
+                        }
+                        
+                        // 阻止页面默认的左右滚动行为
+                        event.preventDefault();
+                        break;
+                        
+                    case 'ArrowRight':
+                        // 向右移动图表
+                        const newRangeRight = {
+                            from: logicalRange.from + moveSpeed,
+                            to: logicalRange.to + moveSpeed
+                        };
+                        timeScale.setVisibleLogicalRange(newRangeRight);
+                        
+                        // 同步其他图表
+                        if (typeof window.forceSyncAllCharts === 'function') {
+                            setTimeout(() => window.forceSyncAllCharts(), 0);
+                        }
+                        
+                        // 阻止页面默认的左右滚动行为
+                        event.preventDefault();
+                        break;
+                }
+            });
+            
+            // 标记键盘导航已设置
+            window.keyboardNavigationSetup = true;
+            console.log('键盘导航功能已启用 (← → 方向键)');
+        };
+        
+        // 应用新的同步机制
+        syncCharts();
+        
+        // 设置键盘导航
+        setupKeyboardNavigation();
         
         // 调用调整函数
         setTimeout(adjustContainerHeights, 100);
@@ -2302,8 +2343,12 @@ window.dash_clientside.clientside = {
                             timeVisible: true,
                             secondsVisible: false,
                         },
-                        rightPriceScale: {
+                        leftPriceScale: {
                             borderColor: '#2B2B43',
+                            visible: true
+                        },
+                        rightPriceScale: {
+                            visible: false,
                         },
                         handleScroll: { mouseWheel: true, pressedMouseMove: true },
                         handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
@@ -2880,13 +2925,54 @@ window.dash_clientside.clientside = {
                         symbolName = "币种";
                     }
                     
+                    // 查找当前仓位的序号
+                    let positionIndex = 0;
+                    
+                    // 方法1：从标记中查找序号信息
+                    for (const marker of markers) {
+                        if (marker.id && marker.id.includes(position.position_id)) {
+                            // 标记文本格式为 "SOL 仓位1 {开仓多}"，提取仓位序号
+                            const match = marker.text.match(/仓位(\d+)/);
+                            if (match && match[1]) {
+                                positionIndex = parseInt(match[1], 10);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 方法2：如果未找到，使用全局仓位计数器的当前值
+                    if (positionIndex === 0 && window.positionCounters && symbolName) {
+                        positionIndex = window.positionCounters[symbolName] || 1;
+                    }
+                    
+                    // 如果仍未找到序号，使用默认值
+                    const positionIndexText = positionIndex > 0 ? `#${positionIndex}` : '';
+                    
                     positionInfoElement.innerHTML = `
-                        <div>
-                            <span class="fw-bold">${symbolName} 仓位 ${window.currentPositionIndex + 1}/${positions.length}</span>
-                        </div>
-                        <div class="small text-info d-block">${positionTime}</div>
-                        <div class="small ${profitClass} fw-bold">
-                            ${positionType} | ${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                        <div class="p-2 mb-2" style="background: ${position.profit >= 0 ? 'rgba(38, 166, 154, 0.1)' : 'rgba(239, 83, 80, 0.1)'}; border-radius: 6px;">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="fw-bold">${symbolName} ${positionIndexText}</span>
+                                <span class="${profitClass} fw-bold">${positionType}</span>
+                            </div>
+                            <div class="small text-info">${positionTime}</div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small text-muted">开仓价:</span>
+                                <span class="small fw-bold">${position.open_price}</span>
+                            </div>
+                            ${!isOpen ? `
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small text-muted">平仓价:</span>
+                                    <span class="small fw-bold">${position.close_price}</span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-1">
+                                    <span class="small text-muted">利润:</span>
+                                    <span class="${profitClass} fw-bold">${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}</span>
+                                </div>
+                            ` : `
+                                <div class="text-warning text-center small fw-bold mt-1">
+                                    持仓中
+                                </div>
+                            `}
                         </div>
                     `;
                     
@@ -3070,13 +3156,54 @@ window.dash_clientside.clientside = {
                                 symbolName = "币种";
                             }
                             
+                            // 查找当前仓位的序号
+                            let positionIndex = 0;
+                            
+                            // 方法1：从标记中查找序号信息
+                            for (const marker of markers) {
+                                if (marker.id && marker.id.includes(position.position_id)) {
+                                    // 标记文本格式为 "SOL 仓位1 {开仓多}"，提取仓位序号
+                                    const match = marker.text.match(/仓位(\d+)/);
+                                    if (match && match[1]) {
+                                        positionIndex = parseInt(match[1], 10);
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // 方法2：如果未找到，使用全局仓位计数器的当前值
+                            if (positionIndex === 0 && window.positionCounters && symbolName) {
+                                positionIndex = window.positionCounters[symbolName] || 1;
+                            }
+                            
+                            // 如果仍未找到序号，使用默认值
+                            const positionIndexText = positionIndex > 0 ? `#${positionIndex}` : '';
+                            
                             positionInfoElement.innerHTML = `
-                                <div>
-                                    <span class="fw-bold">${symbolName} 仓位 ${targetIndex + 1}/${positions.length}</span>
-                                </div>
-                                <div class="small text-info d-block">${positionTime}</div>
-                                <div class="small ${profitClass} fw-bold">
-                                    ${positionType} | ${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                                <div class="p-2 mb-2" style="background: ${position.profit >= 0 ? 'rgba(38, 166, 154, 0.1)' : 'rgba(239, 83, 80, 0.1)'}; border-radius: 6px;">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="fw-bold">${symbolName} ${positionIndexText}</span>
+                                        <span class="${profitClass} fw-bold">${positionType}</span>
+                                    </div>
+                                    <div class="small text-info">${positionTime}</div>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="small text-muted">开仓价:</span>
+                                        <span class="small fw-bold">${position.open_price}</span>
+                                    </div>
+                                    ${!position.close_time ? `
+                                        <div class="text-warning text-center small fw-bold mt-1">
+                                            持仓中
+                                        </div>
+                                    ` : `
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="small text-muted">平仓价:</span>
+                                            <span class="small fw-bold">${position.close_price}</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center mt-1">
+                                            <span class="small text-muted">利润:</span>
+                                            <span class="${profitClass} fw-bold">${position.profit >= 0 ? '+' : ''}${Number(position.profit).toFixed(2)}</span>
+                                        </div>
+                                    `}
                                 </div>
                             `;
                             
