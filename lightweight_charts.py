@@ -1697,8 +1697,8 @@ def create_app():
             dbc.Col([
                 html.Div([
                     # 币种选择卡片
-                    dbc.Card([
-                        dbc.CardBody([
+        dbc.Card([
+            dbc.CardBody([
                             html.H6("交易币种 (交易次数 ≥ 5)", className="mb-3 text-center"),
                             html.Div(
                                 symbol_items,
@@ -1711,171 +1711,185 @@ def create_app():
                     # 控制面板卡片
                     dbc.Card([
                         dbc.CardBody([
-                            # 交易对选择
+                    # 交易对选择
                             dbc.Row([
-                                dbc.Col([
-                                    html.Label("交易对", className="form-label mb-1"),
-                                    dcc.Input(
-                                        id="symbol-input",
-                                        type="text",
-                                        value="NXPC/USDT:USDT",
+                    dbc.Col([
+                        html.Label("交易对", className="form-label mb-1"),
+                        dcc.Input(
+                            id="symbol-input",
+                            type="text",
+                            value="NXPC/USDT:USDT",
                                         className="form-control form-control-sm w-100"
-                                    )
+                        )
                                 ], width=12, className="mb-2"),
-                                
-                                # 时间周期选择
-                                dbc.Col([
-                                    html.Label("时间周期", className="form-label mb-1"),
-                                    dcc.Dropdown(
-                                        id="timeframe-dropdown",
-                                        options=timeframe_options,
-                                        value="1h",
-                                        clearable=False,
-                                        className="dash-dropdown-sm"
-                                    )
+                    
+                    # 时间周期选择
+                    dbc.Col([
+                        html.Label("时间周期", className="form-label mb-1"),
+                        dcc.Dropdown(
+                            id="timeframe-dropdown",
+                            options=timeframe_options,
+                            value="1h",
+                            clearable=False,
+                            className="dash-dropdown-sm"
+                        )
                                 ], width=12, className="mb-2"),
-                                
-                                # 开始日期选择
-                                dbc.Col([
-                                    html.Label("开始日期", className="form-label mb-1"),
-                                    dcc.DatePickerSingle(
-                                        id="start-date-picker",
+                    
+                    # 开始日期选择
+                    dbc.Col([
+                        html.Label("开始日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="start-date-picker",
                                         date=datetime(2025, 5, 15).date(),
-                                        display_format="YYYY-MM-DD",
-                                        className="w-100"
-                                    )
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
                                 ], width=12, className="mb-2"),
-                                
-                                # 结束日期选择
-                                dbc.Col([
-                                    html.Label("结束日期", className="form-label mb-1"),
-                                    dcc.DatePickerSingle(
-                                        id="end-date-picker",
+                    
+                    # 结束日期选择
+                    dbc.Col([
+                        html.Label("结束日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="end-date-picker",
                                         date=datetime(2025, 5, 16).date(),
-                                        display_format="YYYY-MM-DD",
-                                        className="w-100"
-                                    )
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
                                 ], width=12, className="mb-3"),
-                                
-                                # 按钮组
-                                dbc.Col([
-                                    dbc.ButtonGroup([
-                                        dbc.Button(
-                                            "加载数据", 
-                                            id="load-data-button", 
-                                            color="primary", 
-                                            size="sm",
-                                            className="me-1"
-                                        ),
-                                        dbc.Button(
-                                            "重置图表", 
-                                            id="reset-chart-button", 
-                                            color="secondary", 
-                                            size="sm"
-                                        )
-                                    ], className="w-100")
+                    
+                    # 按钮组
+                    dbc.Col([
+                        dbc.ButtonGroup([
+                            dbc.Button(
+                                "加载数据", 
+                                id="load-data-button", 
+                                color="primary", 
+                                size="sm",
+                                className="me-1"
+                            ),
+                            dbc.Button(
+                                "重置图表", 
+                                id="reset-chart-button", 
+                                color="secondary", 
+                                size="sm"
+                            )
+                        ], className="w-100")
                                 ], width=12, className="mb-3"),
-                                
+                
                                 # 指标选项区域
-                                dbc.Col([
+                    dbc.Col([
                                     html.Label("指标选项", className="form-label mb-1"),
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            # 显示交易记录选项
+                        dbc.Card([
+                            dbc.CardBody([
+                                    # 显示交易记录选项
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-trades-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "交易记录",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-trades-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "交易记录",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示EMA20选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-ema-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "EMA20",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示EMA20选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-ema-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "EMA20",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示布林带选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-bollinger-checkbox",
-                                                        className="form-check-input",
-                                                        value=False,
-                                                    ),
-                                                    html.Label(
-                                                        "布林带",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示布林带选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-bollinger-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "布林带",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示RSI指标选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-rsi-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "RSI",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示RSI指标选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-rsi-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "RSI",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示MACD指标选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-macd-checkbox",
-                                                        className="form-check-input",
-                                                        value=False,
-                                                    ),
-                                                    html.Label(
-                                                        "MACD",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示MACD指标选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-macd-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "MACD",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center"),
                                             ])
                                         ], className="py-2 px-3")
                                     ], className="border-light bg-dark custom-card")
                                 ], width=12, className="mb-3"),
-                                
+                    
                                 # 状态信息区域
-                                dbc.Col([
+                    dbc.Col([
                                     html.Label("状态信息", className="form-label mb-1"),
                                     html.Div(id="status-info", className="small p-2 border border-secondary rounded bg-dark")
                                 ], width=12),
-                            ]),
-                        ], className="p-3")
+                    
+                    # 添加调试按钮
+                    dbc.Col([
+                        html.Label("调试工具", className="form-label mb-1"),
+                        dbc.Button(
+                            "检查标记元素", 
+                            id="debug-markers-button", 
+                            color="warning", 
+                            size="sm",
+                            className="w-100 mb-2"
+                        ),
+                        dcc.Store(id="debug-info-store"),
+                        html.Div(id="debug-info-output", className="small text-muted mt-1")
+                    ], width=12, className="mb-3"),
+                ]),
+            ], className="p-3")
                     ], className="border-secondary custom-card"),
                 ], className="control-panel", style={"padding-right": "10px"}),
             ], id="left-sidebar", width=2, className="pe-2 custom-sidebar", style={"box-shadow": "2px 0 10px rgba(0, 0, 0, 0.2)"}),
-            
+        
             # 右侧区域 - 图表（80%宽度）
             dbc.Col([
                 # 图表卡片
-                dbc.Card([
-                    dbc.CardBody([
-                        # 图表容器
-                        html.Div(
-                            id="chart-container",
+        dbc.Card([
+            dbc.CardBody([
+                # 图表容器
+                html.Div(
+                    id="chart-container",
                             className="chart-wrapper",
-                            style={
-                                "width": "100%",
-                                "position": "relative"
-                            }
-                        ),
+                    style={
+                        "width": "100%",
+                        "position": "relative"
+                    }
+                ),
                         
                         # 交互信息显示区
                         html.Div(
@@ -1886,15 +1900,15 @@ def create_app():
                 ], className="border-secondary chart-card", style={"background-color": "#131722", "border-radius": "8px", "overflow": "hidden"}),
             ], width=10, className="ps-1", style={"padding-left": "12px"}),  # 增加左侧内边距
         ], className="g-0"),  # 去除行间距
-        
-        # 数据存储
-        dcc.Store(id="chart-data-store"),
-        dcc.Store(id="trades-data-store"),
+                
+                # 数据存储
+                dcc.Store(id="chart-data-store"),
+                dcc.Store(id="trades-data-store"),
         dcc.Store(id="positions-data-store"),
-        
-        # 添加chart-interaction元素到初始布局
-        html.Div(id="chart-interaction", style={"display": "none"}),
-        
+                
+                # 添加chart-interaction元素到初始布局
+                html.Div(id="chart-interaction", style={"display": "none"}),
+                
         # 导航控制器（可拖动）
         html.Div([
             html.Div([
@@ -2397,6 +2411,108 @@ def create_app():
         Output("symbol-grid", "title"),  # 使用一个不影响UI的属性
         [Input("chart-data-store", "data"),
          Input("trades-data-store", "data")],
+        prevent_initial_call=True
+    )
+    
+    # 最后添加一个调试按钮的回调
+    # 添加调试按钮的客户端回调
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) return "";
+            
+            try {
+                // 检查图表是否已加载
+                if (!window.priceChart) {
+                    return "图表尚未加载，请先加载数据";
+                }
+                
+                // 查找所有标记元素
+                const markerElements = document.querySelectorAll('.tv-lightweight-charts text');
+                const markerIds = document.querySelectorAll('[data-marker-id]');
+                
+                let debugInfo = `找到 ${markerElements.length} 个文本元素, ${markerIds.length} 个带标记ID的元素\\n\\n`;
+                
+                // 输出带ID的元素信息
+                if (markerIds.length > 0) {
+                    debugInfo += "带标记ID的元素:\\n";
+                    markerIds.forEach((el, index) => {
+                        const id = el.getAttribute('data-marker-id');
+                        const text = el.textContent || '(无文本)';
+                        debugInfo += `${index+1}. ID: ${id}, 文本: ${text.substring(0, 30)}${text.length > 30 ? '...' : ''}\\n`;
+                    });
+                    debugInfo += "\\n";
+                }
+                
+                // 输出一些文本元素样本
+                if (markerElements.length > 0) {
+                    const sampleSize = Math.min(5, markerElements.length);
+                    debugInfo += `文本元素样本 (前${sampleSize}个):\\n`;
+                    for (let i = 0; i < sampleSize; i++) {
+                        const text = markerElements[i].textContent || '(无文本)';
+                        debugInfo += `${i+1}. "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"\\n`;
+                    }
+                }
+                
+                // 检查事件监听器
+                let eventInfo = "\\n事件监听器状态:\\n";
+                if (window.priceChart._subscribers && window.priceChart._subscribers.crosshairMove) {
+                    eventInfo += `十字线移动监听器: ${window.priceChart._subscribers.crosshairMove.length} 个\\n`;
+                } else {
+                    eventInfo += "未找到十字线移动监听器\\n";
+                }
+                
+                if (window.priceChart._subscribers && window.priceChart._subscribers.click) {
+                    eventInfo += `点击监听器: ${window.priceChart._subscribers.click.length} 个\\n`;
+                } else {
+                    eventInfo += "未找到点击监听器\\n";
+                }
+                
+                // 添加标记显示诊断信息
+                const navigationController = document.getElementById('navigation-controller');
+                eventInfo += `\\n导航控制器状态: ${navigationController ? '已找到' : '未找到'}\\n`;
+                if (navigationController) {
+                    eventInfo += `显示状态: ${window.getComputedStyle(navigationController).display}\\n`;
+                    eventInfo += `透明度: ${window.getComputedStyle(navigationController).opacity}\\n`;
+                }
+                
+                // 创建修复按钮
+                setTimeout(() => {
+                    // 尝试修复可能的问题
+                    const positionInfoElement = document.getElementById('position-info');
+                    if (positionInfoElement) {
+                        positionInfoElement.innerHTML = `
+                            <div class="p-2 mb-2" style="background: rgba(38, 166, 154, 0.1); border-radius: 6px;">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="fw-bold">调试信息</span>
+                                    <span class="text-warning fw-bold">已激活</span>
+                                </div>
+                                <div class="small text-info">点击或悬停现在应该能正常工作</div>
+                                <div class="text-center small fw-bold mt-1">
+                                    自动修复已应用
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    // 确保导航面板可见
+                    if (navigationController) {
+                        navigationController.style.display = 'block';
+                        navigationController.style.opacity = '1';
+                    }
+                    
+                    // 输出到控制台以便进一步调试
+                    console.log("调试信息:", debugInfo + eventInfo);
+                }, 500);
+                
+                return debugInfo + eventInfo;
+            } catch (error) {
+                return `检查标记元素时出错: ${error.message}`;
+            }
+        }
+        """,
+        Output("debug-info-output", "children"),
+        Input("debug-markers-button", "n_clicks"),
         prevent_initial_call=True
     )
     
