@@ -421,25 +421,25 @@ window.dash_clientside.clientside = {
         volumeContainer.style.width = '100%';
         volumeContainer.style.height = 'calc(30% - 5px)';
         volumeContainer.style.position = 'relative';
-        volumeContainer.style.marginTop = '10px';
+        volumeContainer.style.marginTop = '0px';
         
         // 创建分隔线，可拖动
         const dividerContainer = document.createElement('div');
-        dividerContainer.style.width = '100%';
-        dividerContainer.style.height = '10px';
-        dividerContainer.style.position = 'relative';
-        dividerContainer.style.cursor = 'ns-resize';
-        dividerContainer.style.marginTop = '5px';
-        dividerContainer.style.marginBottom = '5px';
+        // dividerContainer.style.width = '100%';
+        // dividerContainer.style.height = '10px';
+        // dividerContainer.style.position = 'relative';
+        // dividerContainer.style.cursor = 'ns-resize';
+        // dividerContainer.style.marginTop = '5px';
+        // dividerContainer.style.marginBottom = '5px';
         
         const divider = document.createElement('div');
-        divider.style.width = '100%';
-        divider.style.height = '1px';
-        divider.style.background = '#758696';
-        divider.style.borderStyle = 'dashed';
-        divider.style.position = 'absolute';
-        divider.style.top = '50%';
-        divider.style.transform = 'translateY(-50%)';
+        // divider.style.width = '100%';
+        // divider.style.height = '1px';
+        // divider.style.background = '#758696';
+        // divider.style.borderStyle = 'dashed';
+        // divider.style.position = 'absolute';
+        // divider.style.top = '50%';
+        // divider.style.transform = 'translateY(-50%)';
         dividerContainer.appendChild(divider);
         
         // 显示比例的标签
@@ -468,9 +468,9 @@ window.dash_clientside.clientside = {
         if (showRsi) {
             rsiContainer = document.createElement('div');
             rsiContainer.style.width = '100%';
-            rsiContainer.style.height = '150px';
+            rsiContainer.style.height = '250px';  // 增加高度到250px
             rsiContainer.style.position = 'relative';
-            rsiContainer.style.marginTop = '10px';
+            rsiContainer.style.marginTop = '-20px';  // 减少与前一个元素的间距
             
             // 添加RSI容器到主容器
             container.appendChild(rsiContainer);
@@ -479,9 +479,9 @@ window.dash_clientside.clientside = {
         if (showMacd) {
             macdContainer = document.createElement('div');
             macdContainer.style.width = '100%';
-            macdContainer.style.height = '150px';
+            macdContainer.style.height = '250px';  // 增加高度到250px
             macdContainer.style.position = 'relative';
-            macdContainer.style.marginTop = '10px';
+            rsiContainer ? macdContainer.style.marginTop = '-20px' : macdContainer.style.marginTop = '-20px';  // 根据是否有RSI容器调整间距
             
             // 添加MACD容器到主容器
             container.appendChild(macdContainer);
@@ -898,7 +898,7 @@ window.dash_clientside.clientside = {
             
             rsiChart = LightweightCharts.createChart(rsiContainer, {
                 ...commonChartOptions,
-                height: 150,
+                height: 250,
                 timeScale: {
                     ...commonChartOptions.timeScale,
                     visible: true,
@@ -909,6 +909,7 @@ window.dash_clientside.clientside = {
                         top: 0.1,
                         bottom: 0.1,
                     },
+                    autoScale: true,
                 },
                 layout: {
                     ...commonChartOptions.layout,
@@ -980,7 +981,7 @@ window.dash_clientside.clientside = {
             
             macdChart = LightweightCharts.createChart(macdContainer, {
                 ...commonChartOptions,
-                height: 150,
+                height: 250,
                 timeScale: {
                     ...commonChartOptions.timeScale,
                     visible: true,
@@ -991,6 +992,7 @@ window.dash_clientside.clientside = {
                         top: 0.1,
                         bottom: 0.1,
                     },
+                    autoScale: true,
                 },
                 layout: {
                     ...commonChartOptions.layout,
@@ -1588,7 +1590,11 @@ window.dash_clientside.clientside = {
         // 初始调整图表大小
         // 替换原来的简单resize函数
         // 删除旧的resizeChart定义，改用我们新的resizeAllCharts
-        setTimeout(resizeAllCharts, 100);
+        setTimeout(() => {
+            resizeAllCharts();
+            // 调整容器高度
+            adjustContainerHeights();
+        }, 100);
         
         // 创建交易标记和仓位连线 - 修正版本
         if (showTrades && tradesData && tradesData.length > 0) {
@@ -2030,6 +2036,49 @@ window.dash_clientside.clientside = {
         
         // 应用新的同步机制
         syncCharts();
+        
+        // 添加处理函数确保足够的容器高度
+        const adjustContainerHeights = () => {
+            // 获取当前容器高度
+            const containerHeight = container.offsetHeight;
+            
+            // 检查是否启用了RSI和MACD
+            const hasRsi = showRsi && rsiContainer;
+            const hasMacd = showMacd && macdContainer;
+            
+            // 在主图表和各指标图表之间分配高度
+            if (hasRsi || hasMacd) {
+                // 调整主图表和成交量图表的比例
+                const mainChartPercentage = hasRsi && hasMacd ? 50 : 60;
+                const volumePercentage = 20;
+                
+                // 计算RSI和MACD的高度百分比
+                const indicatorPercentage = (100 - mainChartPercentage - volumePercentage) / (hasRsi && hasMacd ? 2 : 1);
+                
+                // 应用新的高度
+                chartContainer.style.height = `calc(${mainChartPercentage}% - 5px)`;
+                volumeContainer.style.height = `calc(${volumePercentage}% - 5px)`;
+                
+                if (hasRsi) {
+                    rsiContainer.style.height = `calc(${indicatorPercentage}% - 5px)`;
+                }
+                
+                if (hasMacd) {
+                    macdContainer.style.height = `calc(${indicatorPercentage}% - 5px)`;
+                }
+                
+                // 更新比例标签
+                ratioLabel.textContent = `${mainChartPercentage}/${volumePercentage}/${indicatorPercentage}`;
+            }
+        };
+        
+        // 调用调整函数
+        setTimeout(adjustContainerHeights, 100);
+        
+        // 在窗口大小改变时再次调整
+        window.addEventListener('resize', () => {
+            setTimeout(adjustContainerHeights, 100);
+        });
         
         // 返回null（Dash回调需要返回值）
         return null;

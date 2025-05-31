@@ -1537,12 +1537,18 @@ def create_app():
                 
                 /* 调整图表容器样式 */
                 .chart-wrapper {
-                    height: calc(100vh - 120px);
-                    min-height: 600px;
+                    height: calc(100vh - 60px);  /* 进一步减少顶部和底部间距 */
+                    min-height: 900px;  /* 进一步增加最小高度 */
                 }
                 
                 #chart-container {
                     height: 100% !important;
+                }
+                
+                /* 优化RSI和MACD容器样式 */
+                .tv-lightweight-charts {
+                    margin-bottom: 0 !important;
+                    padding-bottom: 0 !important;
                 }
                 
                 /* 调整导航控制器位置 */
