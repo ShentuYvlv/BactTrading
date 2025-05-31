@@ -13,9 +13,67 @@ import dotenv
 import hashlib
 import pickle
 import threading
+import urllib3
 
 # 加载.env文件中的环境变量
 dotenv.load_dotenv()
+
+# 添加函数：从CSV文件加载币种数据
+def load_symbols_from_csv(csv_file_path, min_trades=5):
+    """从CSV文件中加载币种数据，并按交易次数过滤
+    
+    Args:
+        csv_file_path (str): CSV文件路径
+        min_trades (int): 最小交易次数，小于此值的币种会被过滤掉
+        
+    Returns:
+        dict: 币种列表及其交易次数，按交易次数降序排序
+    """
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(csv_file_path):
+            logger.error(f"CSV文件不存在: {csv_file_path}")
+            return {}
+        
+        # 读取CSV文件
+        df = pd.read_csv(csv_file_path)
+        logger.info(f"成功读取CSV文件，共 {len(df)} 条交易记录")
+        
+        # 确保必要的列存在
+        required_columns = ['交易对', '交易次数']
+        if not all(col in df.columns for col in required_columns):
+            logger.error(f"CSV文件缺少必要的列: {required_columns}")
+            return {}
+        
+        # 统计每个币种的交易次数
+        symbol_counts = {}
+        for _, row in df.iterrows():
+            symbol = row['交易对']
+            trades = row['交易次数']
+            
+            # 累计交易次数
+            if symbol in symbol_counts:
+                symbol_counts[symbol] += trades
+            else:
+                symbol_counts[symbol] = trades
+        
+        # 过滤交易次数小于min_trades的币种
+        filtered_symbols = {symbol: count for symbol, count in symbol_counts.items() if count >= min_trades}
+        
+        # 按交易次数降序排序
+        sorted_symbols = dict(sorted(filtered_symbols.items(), key=lambda item: item[1], reverse=True))
+        
+        logger.info(f"过滤后的币种: {len(sorted_symbols)}/{len(symbol_counts)}")
+        return sorted_symbols
+    
+    except Exception as e:
+        logger.error(f"读取CSV文件时发生错误: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {}
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 配置日志
 logging.basicConfig(
@@ -74,10 +132,10 @@ def initialize_exchange():
     API_KEY = os.getenv('BINANCE_API_KEY')
     API_SECRET = os.getenv('BINANCE_API_SECRET')
     
-    # 设置币安交易所配置
+    # 设置币安交易所配置 - 与TEST_ca.py中成功的代理配置保持一致
     config = {
         'enableRateLimit': True,
-        'timeout': 60000,  # 超时时间设置为60秒
+        'timeout': 60000,
         'proxies': {
             'http': 'socks5://127.0.0.1:10808',
             'https': 'socks5://127.0.0.1:10808'
@@ -89,19 +147,11 @@ def initialize_exchange():
             'warnOnFetchOHLCVLimitArgument': False,
             'createMarketBuyOrderRequiresPrice': False,
             'fetchOHLCVWarning': False,
-            'ws': {
-                'options': {
-                    'proxy': {
-                        'host': '127.0.0.1',
-                        'port': 10808,
-                        'protocol': 'socks5',
-                    }
-                }
-            }
         },
         'headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        }
+        },
+        'verify': False,  # 禁用SSL证书验证
     }
     
     # 如果提供了API密钥，添加到配置中
@@ -326,9 +376,9 @@ def add_technical_indicators(df):
 
 def prepare_data_for_chart(df):
     """准备数据用于Lightweight Charts渲染"""
-    # 转换时间戳为JavaScript时间戳（毫秒）
-    # 修复类型转换问题：先转换为int64，再进行计算
-    df['time'] = df['timestamp'].astype('int64') // 10**6  # 转换为毫秒
+    # 转换时间戳为JavaScript时间戳（秒）
+    # Lightweight Charts期望秒级时间戳
+    df['time'] = df['timestamp'].astype('int64') // 10**9  # 转换为秒
     
     # 准备K线数据
     candlestick_data = df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
@@ -597,15 +647,17 @@ def merge_trades_to_positions(trades_df):
     
     # 分别记录多头和空头持仓
     long_position = {
-        'amount': 0,
-        'cost': 0,
+        'total_amount': 0,      # 开仓总量
+        'remaining_amount': 0,  # 剩余持仓
+        'total_cost': 0,        # 开仓总成本
         'trades': [],
         'open_time': None
     }
     
     short_position = {
-        'amount': 0,
-        'cost': 0,
+        'total_amount': 0,      # 开仓总量  
+        'remaining_amount': 0,  # 剩余持仓
+        'total_cost': 0,        # 开仓总成本
         'trades': [],
         'open_time': None
     }
@@ -619,9 +671,15 @@ def merge_trades_to_positions(trades_df):
         cost = price * amount
         timestamp = trade.get('timestamp')
         
+        # 转换为北京时区（UTC+8）
+        if pd.notna(timestamp):
+            beijing_timestamp = timestamp + pd.Timedelta(hours=8)
+        else:
+            beijing_timestamp = timestamp
+        
         # 创建交易信息对象
         trade_info = {
-            'timestamp': timestamp,
+            'timestamp': beijing_timestamp,
             'side': side,
             'amount': amount,
             'price': price,
@@ -631,35 +689,45 @@ def merge_trades_to_positions(trades_df):
         # 根据交易方向和当前持仓情况更新仓位
         if side == 'buy':
             # 检查是否平空头仓位
-            if short_position['amount'] > 0:
-                # 计算此次平仓的数量和成本
-                close_amount = min(amount, short_position['amount'])
-                close_cost = close_amount * price
+            if short_position['remaining_amount'] > 0:
+                # 计算此次平仓的数量
+                close_amount = min(amount, short_position['remaining_amount'])
                 
-                if close_amount == short_position['amount']:
-                    # 完全平仓
-                    open_cost = short_position['cost']
-                    open_price = open_cost / short_position['amount']
-                    profit = open_cost - close_cost
+                # 记录平仓交易
+                close_trade = trade_info.copy()
+                close_trade['amount'] = close_amount
+                close_trade['cost'] = close_amount * price
+                short_position['trades'].append(close_trade)
+                
+                # 更新剩余持仓
+                short_position['remaining_amount'] -= close_amount
+                
+                # 检查是否完全平仓
+                if short_position['remaining_amount'] == 0:
+                    # 计算平仓总收入（所有平仓交易的成本之和）
+                    total_close_cost = sum(t['cost'] for t in short_position['trades'] if t['side'] == 'buy')
+                    
+                    # 空头仓位的利润 = 开仓收入 - 平仓成本
+                    profit = short_position['total_cost'] - total_close_cost
                     
                     # 创建平仓的仓位记录
                     position = {
                         'open_time': short_position['open_time'],
-                        'close_time': timestamp,
+                        'close_time': beijing_timestamp,
                         'side': 'short',
-                        'open_price': open_price,
-                        'close_price': price,
-                        'amount': short_position['amount'],
+                        'open_price': short_position['total_cost'] / short_position['total_amount'] if short_position['total_amount'] > 0 else 0,
+                        'close_price': total_close_cost / short_position['total_amount'] if short_position['total_amount'] > 0 else 0,
+                        'amount': short_position['total_amount'],  # 记录开仓总量
                         'profit': profit,
-                        'profit_percent': (profit / open_cost) * 100 if open_cost else 0,
-                        'trades': short_position['trades'] + [trade_info]
+                        'trades': short_position['trades']
                     }
                     positions.append(position)
                     
                     # 重置空头仓位
                     short_position = {
-                        'amount': 0,
-                        'cost': 0,
+                        'total_amount': 0,
+                        'remaining_amount': 0,
+                        'total_cost': 0,
                         'trades': [],
                         'open_time': None
                     }
@@ -667,67 +735,69 @@ def merge_trades_to_positions(trades_df):
                     # 如果买入数量大于平仓数量，剩余部分开多头
                     remaining_amount = amount - close_amount
                     if remaining_amount > 0:
-                        long_position['amount'] += remaining_amount
-                        long_position['cost'] += remaining_amount * price
-                        
-                        # 记录开仓时间
                         if long_position['open_time'] is None:
-                            long_position['open_time'] = timestamp
+                            long_position['open_time'] = beijing_timestamp
                         
-                        # 记录交易
-                        remaining_trade = trade_info.copy()
-                        remaining_trade['amount'] = remaining_amount
-                        remaining_trade['cost'] = remaining_amount * price
-                        long_position['trades'].append(remaining_trade)
-                else:
-                    # 部分平仓，更新空头仓位
-                    short_position['amount'] -= close_amount
-                    short_position['cost'] -= (short_position['cost'] / (short_position['amount'] + close_amount)) * close_amount
-                    
-                    # 记录此次平仓交易
-                    trade_info['amount'] = close_amount
-                    trade_info['cost'] = close_amount * price
-                    short_position['trades'].append(trade_info)
+                        long_position['total_amount'] += remaining_amount
+                        long_position['remaining_amount'] += remaining_amount
+                        long_position['total_cost'] += remaining_amount * price
+                        
+                        # 记录开仓交易
+                        open_trade = trade_info.copy()
+                        open_trade['amount'] = remaining_amount
+                        open_trade['cost'] = remaining_amount * price
+                        long_position['trades'].append(open_trade)
             else:
                 # 没有空头仓位，直接开多头
                 if long_position['open_time'] is None:
-                    long_position['open_time'] = timestamp
+                    long_position['open_time'] = beijing_timestamp
                 
-                long_position['amount'] += amount
-                long_position['cost'] += cost
+                long_position['total_amount'] += amount
+                long_position['remaining_amount'] += amount
+                long_position['total_cost'] += cost
                 long_position['trades'].append(trade_info)
         
         elif side == 'sell':
             # 检查是否平多头仓位
-            if long_position['amount'] > 0:
-                # 计算此次平仓的数量和成本
-                close_amount = min(amount, long_position['amount'])
-                close_cost = close_amount * price
+            if long_position['remaining_amount'] > 0:
+                # 计算此次平仓的数量
+                close_amount = min(amount, long_position['remaining_amount'])
                 
-                if close_amount == long_position['amount']:
-                    # 完全平仓
-                    open_cost = long_position['cost']
-                    open_price = open_cost / long_position['amount'] if long_position['amount'] > 0 else 0
-                    profit = close_cost - open_cost
+                # 记录平仓交易
+                close_trade = trade_info.copy()
+                close_trade['amount'] = close_amount
+                close_trade['cost'] = close_amount * price
+                long_position['trades'].append(close_trade)
+                
+                # 更新剩余持仓
+                long_position['remaining_amount'] -= close_amount
+                
+                # 检查是否完全平仓
+                if long_position['remaining_amount'] == 0:
+                    # 计算平仓总收入（所有平仓交易的成本之和）
+                    total_close_revenue = sum(t['cost'] for t in long_position['trades'] if t['side'] == 'sell')
+                    
+                    # 多头仓位的利润 = 平仓收入 - 开仓成本
+                    profit = total_close_revenue - long_position['total_cost']
                     
                     # 创建平仓的仓位记录
                     position = {
                         'open_time': long_position['open_time'],
-                        'close_time': timestamp,
+                        'close_time': beijing_timestamp,
                         'side': 'long',
-                        'open_price': open_price,
-                        'close_price': price,
-                        'amount': long_position['amount'],
+                        'open_price': long_position['total_cost'] / long_position['total_amount'] if long_position['total_amount'] > 0 else 0,
+                        'close_price': total_close_revenue / long_position['total_amount'] if long_position['total_amount'] > 0 else 0,
+                        'amount': long_position['total_amount'],  # 记录开仓总量
                         'profit': profit,
-                        'profit_percent': (profit / open_cost) * 100 if open_cost else 0,
-                        'trades': long_position['trades'] + [trade_info]
+                        'trades': long_position['trades']
                     }
                     positions.append(position)
                     
                     # 重置多头仓位
                     long_position = {
-                        'amount': 0,
-                        'cost': 0,
+                        'total_amount': 0,
+                        'remaining_amount': 0,
+                        'total_cost': 0,
                         'trades': [],
                         'open_time': None
                     }
@@ -735,38 +805,30 @@ def merge_trades_to_positions(trades_df):
                     # 如果卖出数量大于平仓数量，剩余部分开空头
                     remaining_amount = amount - close_amount
                     if remaining_amount > 0:
-                        short_position['amount'] += remaining_amount
-                        short_position['cost'] += remaining_amount * price
-                        
-                        # 记录开仓时间
                         if short_position['open_time'] is None:
-                            short_position['open_time'] = timestamp
+                            short_position['open_time'] = beijing_timestamp
                         
-                        # 记录交易
-                        remaining_trade = trade_info.copy()
-                        remaining_trade['amount'] = remaining_amount
-                        remaining_trade['cost'] = remaining_amount * price
-                        short_position['trades'].append(remaining_trade)
-                else:
-                    # 部分平仓，更新多头仓位
-                    long_position['amount'] -= close_amount
-                    long_position['cost'] -= (long_position['cost'] / (long_position['amount'] + close_amount)) * close_amount
-                    
-                    # 记录此次平仓交易
-                    trade_info['amount'] = close_amount
-                    trade_info['cost'] = close_amount * price
-                    long_position['trades'].append(trade_info)
+                        short_position['total_amount'] += remaining_amount
+                        short_position['remaining_amount'] += remaining_amount
+                        short_position['total_cost'] += remaining_amount * price
+                        
+                        # 记录开仓交易
+                        open_trade = trade_info.copy()
+                        open_trade['amount'] = remaining_amount
+                        open_trade['cost'] = remaining_amount * price
+                        short_position['trades'].append(open_trade)
             else:
                 # 没有多头仓位，直接开空头
                 if short_position['open_time'] is None:
-                    short_position['open_time'] = timestamp
+                    short_position['open_time'] = beijing_timestamp
                 
-                short_position['amount'] += amount
-                short_position['cost'] += cost
+                short_position['total_amount'] += amount
+                short_position['remaining_amount'] += amount
+                short_position['total_cost'] += cost
                 short_position['trades'].append(trade_info)
     
     # 检查是否还有未平仓的仓位（当前持仓）
-    if long_position['amount'] > 0:
+    if long_position['remaining_amount'] > 0:
         # 添加当前持有的多头仓位，使用最后一个价格作为"未平仓"价格
         last_price = trades_df['price'].iloc[-1] if 'price' in trades_df.columns else 0
         
@@ -774,17 +836,16 @@ def merge_trades_to_positions(trades_df):
             'open_time': long_position['open_time'],
             'close_time': None,  # 未平仓
             'side': 'long',
-            'open_price': long_position['cost'] / long_position['amount'] if long_position['amount'] > 0 else 0,
+            'open_price': long_position['total_cost'] / long_position['total_amount'] if long_position['total_amount'] > 0 else 0,
             'close_price': last_price,  # 当前价格
-            'amount': long_position['amount'],
-            'profit': (last_price * long_position['amount']) - long_position['cost'],
-            'profit_percent': ((last_price * long_position['amount'] - long_position['cost']) / long_position['cost']) * 100 if long_position['cost'] else 0,
+            'amount': long_position['total_amount'],  # 开仓总量
+            'profit': (last_price * long_position['remaining_amount']) - long_position['total_cost'],
             'trades': long_position['trades'],
             'is_open': True  # 标记为未平仓
         }
         positions.append(position)
     
-    if short_position['amount'] > 0:
+    if short_position['remaining_amount'] > 0:
         # 添加当前持有的空头仓位，使用最后一个价格作为"未平仓"价格
         last_price = trades_df['price'].iloc[-1] if 'price' in trades_df.columns else 0
         
@@ -792,11 +853,10 @@ def merge_trades_to_positions(trades_df):
             'open_time': short_position['open_time'],
             'close_time': None,  # 未平仓
             'side': 'short',
-            'open_price': short_position['cost'] / short_position['amount'] if short_position['amount'] > 0 else 0,
+            'open_price': short_position['total_cost'] / short_position['total_amount'] if short_position['total_amount'] > 0 else 0,
             'close_price': last_price,  # 当前价格
-            'amount': short_position['amount'],
-            'profit': short_position['cost'] - (last_price * short_position['amount']),
-            'profit_percent': ((short_position['cost'] - last_price * short_position['amount']) / short_position['cost']) * 100 if short_position['cost'] else 0,
+            'amount': short_position['total_amount'],  # 开仓总量
+            'profit': short_position['total_cost'] - (last_price * short_position['remaining_amount']),
             'trades': short_position['trades'],
             'is_open': True  # 标记为未平仓
         }
@@ -817,6 +877,10 @@ def create_app():
     """创建Dash应用"""
     # 初始化交易所
     exchange = initialize_exchange()
+    
+    # 加载币种数据
+    csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
+    symbols_data = load_symbols_from_csv(csv_file_path)
     
     # 创建应用
     app = dash.Dash(
@@ -844,6 +908,80 @@ def create_app():
                     } else {
                         console.error('Lightweight Charts 库加载失败!');
                     }
+                });
+                
+                // 添加拖动功能
+                window.addEventListener('load', function() {
+                    // 导航控制器拖动功能 - 优化版本
+                    function makeElementDraggable(element) {
+                        if (!element) return;
+                        
+                        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+                        
+                        const dragHeader = element.querySelector('.drag-header') || element;
+                        
+                        if (dragHeader) {
+                            dragHeader.onmousedown = dragMouseDown;
+                        }
+                        
+                        function dragMouseDown(e) {
+                            e = e || window.event;
+                            e.preventDefault();
+                            // 获取鼠标位置
+                            pos3 = e.clientX;
+                            pos4 = e.clientY;
+                            
+                            // 直接添加事件监听器到document对象
+                            document.addEventListener('mousemove', elementDrag);
+                            document.addEventListener('mouseup', closeDragElement);
+                            
+                            // 添加拖动中的样式 - 禁用过渡效果以提高性能
+                            element.classList.add('dragging');
+                            
+                            // 禁用可能影响性能的CSS属性
+                            element.style.transition = 'none';
+                            element.style.willChange = 'transform';
+                        }
+                        
+                        function elementDrag(e) {
+                            e = e || window.event;
+                            e.preventDefault();
+                            
+                            // 计算新位置 - 直接使用当前鼠标位置与上一位置的差值
+                            const dx = e.clientX - pos3;
+                            const dy = e.clientY - pos4;
+                            pos3 = e.clientX;
+                            pos4 = e.clientY;
+                            
+                            // 设置元素的新位置 - 使用transform而不是top/left以提高性能
+                            const currentTop = (element.offsetTop + dy);
+                            const currentLeft = (element.offsetLeft + dx);
+                            
+                            // 应用新位置 - 使用translate3d触发GPU加速
+                            element.style.top = currentTop + 'px';
+                            element.style.left = currentLeft + 'px';
+                        }
+                        
+                        function closeDragElement() {
+                            // 移除事件监听器
+                            document.removeEventListener('mousemove', elementDrag);
+                            document.removeEventListener('mouseup', closeDragElement);
+                            
+                            // 移除拖动中的样式，恢复过渡效果
+                            element.classList.remove('dragging');
+                            element.style.transition = '';
+                            element.style.willChange = 'auto';
+                        }
+                    }
+                    
+                    // 应用拖动功能到导航控制器 - 确保DOM完全加载
+                    setTimeout(function() {
+                        const navigationController = document.getElementById('navigation-controller');
+                        if (navigationController) {
+                            makeElementDraggable(navigationController);
+                            console.log('已添加导航控制器拖动功能');
+                        }
+                    }, 500);
                 });
             </script>
             <style>
@@ -1102,6 +1240,102 @@ def create_app():
                     color: #42a5f5 !important;
                 }
                 
+                /* 币种选择框样式 */
+                .symbol-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                    gap: 8px;
+                    max-height: 200px;
+                    overflow-y: auto;
+                    padding: 10px;
+                    margin-bottom: 10px;
+                }
+                
+                .symbol-item {
+                    background-color: #1c2030;
+                    border: 1px solid #2B2B43;
+                    border-radius: 6px;
+                    padding: 8px;
+                    text-align: center;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    user-select: none;
+                }
+                
+                .symbol-item:hover {
+                    background-color: #232838;
+                    border-color: #3a3f50;
+                }
+                
+                .symbol-item.active {
+                    background-color: #2962ff;
+                    border-color: #2962ff;
+                    color: white;
+                }
+                
+                .symbol-name {
+                    font-size: 12px;
+                    font-weight: 500;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                .symbol-count {
+                    font-size: 10px;
+                    color: #9aa1b9;
+                }
+                
+                .symbol-item.active .symbol-count {
+                    color: rgba(255, 255, 255, 0.8);
+                }
+                
+                /* 导航控制器样式 */
+                #navigation-controller {
+                    position: fixed;
+                    top: 120px;
+                    right: 20px;
+                    width: 180px;
+                    background-color: rgba(19, 23, 34, 0.9);
+                    border: 1px solid #2B2B43;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+                    z-index: 1000;
+                    backdrop-filter: blur(4px);
+                    transition: opacity 0.2s ease;
+                    cursor: move;
+                    transform: translate3d(0, 0, 0); /* 启用GPU加速 */
+                    will-change: transform; /* 告知浏览器该元素将要变化 */
+                    touch-action: none; /* 防止触摸设备上的默认行为 */
+                    user-select: none; /* 防止文本选择干扰拖动 */
+                }
+                
+                #navigation-controller.dragging {
+                    opacity: 0.95;
+                    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+                    transition: none !important; /* 拖动时禁用过渡效果 */
+                    pointer-events: none; /* 拖动时忽略指针事件 */
+                }
+                
+                .drag-header {
+                    padding: 8px 12px;
+                    background-color: rgba(28, 32, 48, 0.8);
+                    border-bottom: 1px solid #2B2B43;
+                    border-radius: 8px 8px 0 0;
+                    cursor: move;
+                    user-select: none;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .nav-controls {
+                    padding: 12px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }
+                
                 /* 响应式调整 */
                 @media (max-width: 992px) {
                     .form-label {
@@ -1110,6 +1344,14 @@ def create_app():
                     
                     .btn {
                         font-size: 0.8rem;
+                    }
+                    
+                    .symbol-grid {
+                        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+                    }
+                    
+                    #navigation-controller {
+                        width: 150px;
                     }
                 }
             </style>
@@ -1135,9 +1377,32 @@ def create_app():
         {'label': '1天', 'value': '1d'},
     ]
     
+    # 将币种数据转换为选项列表
+    symbol_items = []
+    for symbol, count in symbols_data.items():
+        symbol_items.append(
+            html.Div([
+                html.Div(symbol, className="symbol-name"),
+                html.Div(f"交易: {count}", className="symbol-count")
+            ], id=f"symbol-{symbol.replace('/', '-').replace(':', '_')}",
+                className="symbol-item",
+                n_clicks=0,
+                title=f"{symbol} - 交易次数: {count}")
+        )
+    
     # 应用布局
     app.layout = dbc.Container([
-        # 标题行
+        # 币种选择卡片
+        dbc.Card([
+            dbc.CardBody([
+                html.H6("交易币种 (交易次数 ≥ 5)", className="mb-3 text-center"),
+                html.Div(
+                    symbol_items,
+                    id="symbol-grid",
+                    className="symbol-grid"
+                )
+            ], className="p-3")
+        ], className="mb-3 border-secondary"),
         
         # 控制行 - 使用卡片容器和更紧凑的布局
         dbc.Card([
@@ -1153,7 +1418,7 @@ def create_app():
                             value="NXPC/USDT:USDT",
                             className="form-control form-control-sm"
                         )
-                    ], width=3, className="pe-2"),
+                    ], width=2, className="pe-2"),
                     
                     # 时间周期选择
                     dbc.Col([
@@ -1165,14 +1430,14 @@ def create_app():
                             clearable=False,
                             className="dash-dropdown-sm"
                         )
-                    ], width=2, className="px-2"),
+                    ], width=1, className="px-2"),
                     
                     # 开始日期选择
                     dbc.Col([
                         html.Label("开始日期", className="form-label mb-1"),
                         dcc.DatePickerSingle(
                             id="start-date-picker",
-                            date=datetime.now().date() - timedelta(days=7),
+                            date=datetime(2025, 5, 15).date(),
                             display_format="YYYY-MM-DD",
                             className="w-100"
                         )
@@ -1183,7 +1448,7 @@ def create_app():
                         html.Label("结束日期", className="form-label mb-1"),
                         dcc.DatePickerSingle(
                             id="end-date-picker",
-                            date=datetime.now().date(),
+                            date=datetime(2025, 5, 16).date(),
                             display_format="YYYY-MM-DD",
                             className="w-100"
                         )
@@ -1310,6 +1575,7 @@ def create_app():
                 # 数据存储
                 dcc.Store(id="chart-data-store"),
                 dcc.Store(id="trades-data-store"),
+                dcc.Store(id="positions-data-store"),
                 
                 # 添加chart-interaction元素到初始布局
                 html.Div(id="chart-interaction", style={"display": "none"}),
@@ -1321,6 +1587,30 @@ def create_app():
                 )
             ], className="p-0")
         ], className="border-secondary"),
+        
+        # 导航控制器（可拖动）
+        html.Div([
+            html.Div([
+                html.Span("仓位导航", className="fw-bold text-light small"),
+                html.Span("✥", className="text-muted small", title="拖动")
+            ], className="drag-header"),
+            
+            html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(id="position-info", className="mb-2 text-center small")
+                    ], width=12),
+                    
+                    dbc.Col([
+                        dbc.Button("上一个", id="prev-position-button", color="secondary", size="sm", className="w-100 mb-2")
+                    ], width=12),
+                    
+                    dbc.Col([
+                        dbc.Button("下一个", id="next-position-button", color="primary", size="sm", className="w-100")
+                    ], width=12)
+                ])
+            ], className="nav-controls")
+        ], id="navigation-controller"),
         
         # 加载动画
         dbc.Spinner(html.Div(id="loading-spinner"), color="primary"),
@@ -1359,10 +1649,9 @@ def create_app():
             logger.info(f"计算的时间范围: 从 {start} 到 {end}")
         except Exception as e:
             logger.error(f"处理时间范围时出错: {e}")
-            # 使用默认值 - 今天和7天前
-            now = datetime.now()
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            # 使用默认值 - 2024年7月1日到2025年5月1日
+            start = datetime(2024, 7, 1)
+            end = datetime(2025, 5, 1, 23, 59, 59)
             logger.info(f"使用默认时间范围: 从 {start} 到 {end}")
         
         # 转换为时间戳（毫秒）
@@ -1415,46 +1704,57 @@ def create_app():
                 if not df_trades.empty:
                     positions_df = merge_trades_to_positions(df_trades)
                     
-                    # 准备交易数据用于图表展示
+                    # 准备仓位数据用于图表展示 - 新的格式
                     positions_data = []
                     
                     if not positions_df.empty:
                         logger.info(f"处理 {len(positions_df)} 个仓位用于图表展示")
                         
                         for _, pos in positions_df.iterrows():
-                            # 开仓标记
-                            if pd.notna(pos['open_time']):
-                                # 将开仓时间转换为时间戳（秒）
-                                open_time = int(pd.to_datetime(pos['open_time']).timestamp())
+                            # 检查仓位是否有有效的开仓和平仓时间
+                            if pd.notna(pos['open_time']) and pd.notna(pos['close_time']):
+                                # 将时间转换为Unix时间戳（秒）以匹配K线数据的 time 格式
+                                # 明确指定时区为UTC+8（北京时间），然后转换为Unix时间戳
+                                open_timestamp = int(pd.to_datetime(pos['open_time']).tz_localize('Asia/Shanghai').timestamp())
+                                close_timestamp = int(pd.to_datetime(pos['close_time']).tz_localize('Asia/Shanghai').timestamp())
                                 
-                                # 创建开仓标记
-                                positions_data.append({
-                                    'time': open_time,
-                                    'price': pos['open_price'],
-                                    'side': 'buy' if pos['side'] == 'long' else 'sell',
-                                    'amount': pos['amount'],
-                                    'cost': pos['amount'] * pos['open_price'],
-                                    'position_type': 'open',
-                                    'position_id': str(pos.name)  # 使用DataFrame索引作为唯一标识
-                                })
-                            
-                            # 平仓标记(如果已平仓)
-                            if pd.notna(pos['close_time']):
-                                # 将平仓时间转换为时间戳（秒）
-                                close_time = int(pd.to_datetime(pos['close_time']).timestamp())
+                                # 创建仓位数据对象，包含开仓和平仓的完整信息
+                                position_data = {
+                                    'position_id': str(pos.name),  # 使用DataFrame索引作为唯一标识
+                                    'side': pos['side'],  # 'long' 或 'short'
+                                    'open_time': open_timestamp,
+                                    'close_time': close_timestamp,
+                                    'open_price': float(pos['open_price']),
+                                    'close_price': float(pos['close_price']),
+                                    'amount': float(pos['amount']),
+                                    'profit': float(pos['profit']),
+                                    # 格式化的时间字符串（北京时间）
+                                    'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                    'close_time_formatted': pos['close_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                    'is_profit': pos['profit'] >= 0
+                                }
                                 
-                                # 创建平仓标记
-                                positions_data.append({
-                                    'time': close_time,
-                                    'price': pos['close_price'],
-                                    'side': 'sell' if pos['side'] == 'long' else 'buy',
-                                    'amount': pos['amount'],
-                                    'cost': pos['amount'] * pos['close_price'],
-                                    'position_type': 'close',
+                                positions_data.append(position_data)
+                            elif pd.notna(pos['open_time']) and pos.get('is_open', False):
+                                # 仅有开仓信息的持仓，时间同样使用秒级并指定时区
+                                open_timestamp = int(pd.to_datetime(pos['open_time']).tz_localize('Asia/Shanghai').timestamp())
+                                
+                                position_data = {
                                     'position_id': str(pos.name),
-                                    'profit': pos['profit'],
-                                    'profit_percent': pos['profit_percent']
-                                })
+                                    'side': pos['side'],
+                                    'open_time': open_timestamp,
+                                    'close_time': None,  # 未平仓
+                                    'open_price': float(pos['open_price']),
+                                    'close_price': None,
+                                    'amount': float(pos['amount']),
+                                    'profit': float(pos['profit']),
+                                    'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                    'close_time_formatted': '持仓中',
+                                    'is_open': True,
+                                    'is_profit': pos['profit'] >= 0
+                                }
+                                
+                                positions_data.append(position_data)
                 else:
                     positions_df = pd.DataFrame()
                     positions_data = []
@@ -1523,6 +1823,137 @@ def create_app():
         except Exception as e:
             logger.error(f"解析交互数据错误: {str(e)}")
             return html.P("数据解析错误")
+    
+    # 仓位导航回调
+    @app.callback(
+        [Output("position-info", "children")],
+        [Input("prev-position-button", "n_clicks"),
+         Input("next-position-button", "n_clicks")],
+        [State("trades-data-store", "data")]
+    )
+    def navigate_positions(prev_clicks, next_clicks, positions_json):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return [html.Div("请先加载数据", className="text-muted small")]
+        
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        # 全局变量用于跟踪当前位置
+        if not hasattr(navigate_positions, 'current_index'):
+            navigate_positions.current_index = 0
+        
+        try:
+            # 解析仓位数据
+            if not positions_json:
+                return [html.Div("暂无仓位数据", className="text-muted small")]
+            
+            positions = json.loads(positions_json)
+            if not positions or len(positions) == 0:
+                return [html.Div("暂无仓位数据", className="text-muted small")]
+            
+            # 确定导航方向
+            if trigger_id == "prev-position-button" and prev_clicks:
+                navigate_positions.current_index = (navigate_positions.current_index - 1) % len(positions)
+            elif trigger_id == "next-position-button" and next_clicks:
+                navigate_positions.current_index = (navigate_positions.current_index + 1) % len(positions)
+            
+            # 获取当前仓位
+            current_position = positions[navigate_positions.current_index]
+            
+            # 创建仓位信息显示
+            position_side = "多头" if current_position.get('side') == 'long' else "空头"
+            profit = current_position.get('profit', 0)
+            profit_class = "text-success" if profit >= 0 else "text-danger"
+            
+            return [html.Div([
+                html.Div([
+                    html.Span(f"仓位 ", className="small text-muted"),
+                    html.Span(f"{navigate_positions.current_index + 1}/{len(positions)}", className="fw-bold")
+                ]),
+                html.Div([
+                    html.Span(f"{position_side} ", className="fw-bold"),
+                    html.Span(f"{current_position.get('open_time_formatted', '')}", className="small text-info d-block")
+                ]),
+                html.Div([
+                    html.Span(f"{current_position.get('close_time_formatted', '持仓中')}", className="small text-warning d-block")
+                ]) if current_position.get('close_time_formatted') else None,
+                html.Div([
+                    html.Span(f"盈亏: ", className="small text-muted"),
+                    html.Span(f"{profit:.2f}", className=f"{profit_class} fw-bold")
+                ], className="mt-1")
+            ])]
+        
+        except Exception as e:
+            logger.error(f"导航仓位时出错: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return [html.Div(f"导航出错: {str(e)}", className="text-danger small")]
+    
+    # 添加客户端脚本来实现仓位跳转
+    app.clientside_callback(
+        """
+        function(prevClicks, nextClicks, positionsData) {
+            const ctx = window.dash_clientside.callback_context;
+            if (!ctx.triggered.length) return;
+            
+            const triggerId = ctx.triggered[0].prop_id.split('.')[0];
+            
+            try {
+                // 检查是否有仓位数据
+                if (!positionsData) return;
+                
+                const positions = JSON.parse(positionsData);
+                if (!positions || positions.length === 0) return;
+                
+                // 全局变量保存当前索引
+                if (typeof window.currentPositionIndex === 'undefined') {
+                    window.currentPositionIndex = 0;
+                }
+                
+                // 根据按钮更新索引
+                if (triggerId === 'prev-position-button' && prevClicks) {
+                    window.currentPositionIndex = (window.currentPositionIndex - 1 + positions.length) % positions.length;
+                } else if (triggerId === 'next-position-button' && nextClicks) {
+                    window.currentPositionIndex = (window.currentPositionIndex + 1) % positions.length;
+                }
+                
+                // 获取当前仓位
+                const position = positions[window.currentPositionIndex];
+                if (!position) return;
+                
+                // 获取时间戳
+                const timestamp = position.open_time;
+                if (!timestamp) return;
+                
+                // 查找图表实例
+                const chartContainer = document.getElementById('chart-container');
+                if (!chartContainer) return;
+                
+                // 如果已经挂载了priceChart，尝试跳转到指定时间
+                if (window.priceChart) {
+                    // 设置可见范围
+                    const timeRange = {
+                        from: timestamp - 3600 * 24,  // 往前1天
+                        to: timestamp + 3600 * 24     // 往后1天
+                    };
+                    
+                    window.priceChart.timeScale().setVisibleRange(timeRange);
+                    console.log('已跳转到仓位时间点:', new Date(timestamp * 1000));
+                }
+                
+                return true;
+            } catch (error) {
+                console.error('仓位跳转出错:', error);
+                return false;
+            }
+        }
+        """,
+        Output("chart-container", "n_clicks", allow_duplicate=True),
+        [Input("prev-position-button", "n_clicks"),
+         Input("next-position-button", "n_clicks")],
+        [State("trades-data-store", "data")],
+        prevent_initial_call=True
+    )
     
     return app
 

@@ -95,7 +95,7 @@ const createLegend = (chart, container, items) => {
 // 添加自定义的鼠标交互处理
 const addChartInteractions = (chartInstance, containerElement, isMainChart = false) => {
     // 鼠标滚轮事件 - 缩放图表
-    containerElement.addEventListener('wheel', (e) => {
+    /* containerElement.addEventListener('wheel', (e) => {
         e.preventDefault(); // 阻止页面滚动
         
         // 获取鼠标位置相对于容器的坐标
@@ -107,32 +107,13 @@ const addChartInteractions = (chartInstance, containerElement, isMainChart = fal
         
         if (isPriceAxisArea) {
             // 鼠标在价格轴上，控制价格缩放
-            const delta = e.deltaY;
-            const priceScale = chartInstance.priceScale('right');
-            
-            if (priceScale) {
-                // 获取当前的价格范围
-                const currentRange = priceScale.priceRange();
-                if (!currentRange) return;
-                
-                // 计算新的价格范围
-                let newRange;
-                if (delta < 0) {
-                    // 放大 - 缩小范围
-                    newRange = currentRange.multiply(0.9);
+            // 对于4.0.1版本，我们依赖图表库的内置行为，这里不需要显式调用缩放API
+            // 确保 chartOptions 中的 handleScale.axisPressedMouseMove.price 和 handleScale.mouseWheel 设置为 true
                 } else {
-                    // 缩小 - 扩大范围
-                    newRange = currentRange.multiply(1.1);
-                }
-                
-                // 应用新的价格范围
-                priceScale.applyOptions({
-                    autoScale: false,
-                });
-                priceScale.setPriceRange(newRange);
-            }
+            // 鼠标在图表主体上，控制时间轴缩放（默认行为）
+            // chartInstance.timeScale().scrollPosition(chartInstance.timeScale().scrollPosition() - e.deltaY / 100);
         }
-    }, { passive: false });
+    }, { passive: false }); */
 
     // 添加双击重置功能
     containerElement.addEventListener('dblclick', (e) => {
@@ -149,7 +130,7 @@ const addChartInteractions = (chartInstance, containerElement, isMainChart = fal
                 // 自动缩放后恢复手动模式
                 setTimeout(() => {
                     priceScale.applyOptions({
-                        autoScale: false
+                        autoScale: false // 或者根据需要保持true
                     });
                 }, 10);
             }
@@ -1438,16 +1419,6 @@ window.dash_clientside.clientside = {
                                     }
                                 }
                             });
-                            
-                            // 重新建立同步关系
-                            syncCharts();
-                            document.body.classList.remove('charts-resizing');
-                        }, 50);
-            } else {
-                        // 如果没有主图表设置，也重新建立同步关系
-                        setTimeout(() => {
-                            syncCharts();
-                            document.body.classList.remove('charts-resizing');
                         }, 50);
                     }
                 } catch (error) {
@@ -1602,237 +1573,417 @@ window.dash_clientside.clientside = {
         // 删除旧的resizeChart定义，改用我们新的resizeAllCharts
         setTimeout(resizeAllCharts, 100);
         
-        // 创建交易标记 - 确保正确添加到图表
+        // 创建交易标记和仓位连线 - 修正版本
         if (showTrades && tradesData && tradesData.length > 0) {
             try {
-                console.log('正在添加交易标记...', tradesData.length);
+                console.log('正在添加仓位标记...', tradesData.length);
                 
-                // 创建一个数组来存储所有标记
+                // 存储标记数据
                 const markers = [];
+                const positionDetailsMap = {};
                 
-                // 创建一个映射，用于存储每个交易的详细信息
-                const tradeDetailsMap = {};
-                
-                // 将交易标记添加到图表
-                tradesData.forEach(trade => {
-                    if (!trade.time || !trade.price) {
-                        console.warn('交易数据缺少时间或价格:', trade);
+                // 处理每个仓位
+                tradesData.forEach(position => {
+                    if (!position.open_time || !position.open_price) {
+                        console.warn('仓位数据缺少开仓时间或价格:', position);
                         return;
                     }
                     
-                    // 确保时间格式正确 - 如果是毫秒时间戳，转换为秒
-                    const tradeTime = typeof trade.time === 'number' && trade.time > 1000000000000 
-                        ? Math.floor(trade.time / 1000) 
-                        : trade.time;
+                    const positionId = position.position_id || `pos-${Math.random().toString(36).substr(2, 5)}`;
                     
-                    // 判断是开仓还是平仓
-                    const isOpen = trade.position_type === 'open';
-                    const isClose = trade.position_type === 'close';
+                    // 修正时间格式 - 现在后端已经发送秒级时间戳，直接使用
+                    const openTime = position.open_time;
+                    console.log(`仓位 ${positionId} 开仓时间:`, openTime, new Date(openTime * 1000));
                     
-                    // 创建带有ID的标记，以便后续可以识别
-                    const tradeId = `trade-${tradeTime}-${trade.side}-${trade.position_id || Math.random().toString(36).substr(2, 5)}`;
+                    // 创建开仓标记
+                    const openMarker = {
+                        time: openTime, // 使用秒级时间戳匹配K线数据
+                        position: 'belowBar',
+                        color: position.side === 'long' ? '#4CAF50' : '#F44336',
+                        shape: position.side === 'long' ? 'arrowUp' : 'arrowDown',
+                        text: `${positionId}开仓${position.side === 'long' ? '多' : '空'}`,
+                        id: `${positionId}_open`,
+                        size: 1.2
+                    };
                     
-                    // 为不同类型的交易设置不同的样式
-                    let markerShape = 'circle';
-                    let markerColor = '#26a69a';  // 默认颜色
-                    let markerSize = 3;
-                    let markerPosition = 'belowBar';
-                    let markerText = '';
+                    markers.push(openMarker);
                     
-                    if (isOpen) {
-                        // 开仓标记
-                        markerShape = trade.side === 'buy' ? 'arrowUp' : 'arrowDown';
-                        markerColor = trade.side === 'buy' ? '#26a69a' : '#ef5350';
-                        markerText = trade.side === 'buy' ? '多' : '空';
-                        markerPosition = trade.side === 'buy' ? 'belowBar' : 'aboveBar';
-                        markerSize = 4;
-                    } else if (isClose) {
-                        // 平仓标记
-                        markerShape = trade.side === 'sell' ? 'circle' : 'circle';
+                    // 如果有平仓时间，创建平仓标记（不再创建连线）
+                    if (position.close_time && position.close_price) {
+                        const closeTime = position.close_time;
+                        console.log(`仓位 ${positionId} 平仓时间:`, closeTime, new Date(closeTime * 1000));
                         
-                        // 根据利润设置颜色
-                        if (trade.profit !== undefined) {
-                            markerColor = trade.profit >= 0 ? '#26a69a' : '#ef5350';
-                        } else {
-                            markerColor = trade.side === 'sell' ? '#26a69a' : '#ef5350';
-                        }
+                        const closeMarker = {
+                            time: closeTime, // 使用秒级时间戳匹配K线数据
+                            position: 'aboveBar',
+                            color: position.is_profit ? '#4CAF50' : '#F44336',
+                            shape: position.side === 'long' ? 'arrowDown' : 'arrowUp',
+                            text: `${positionId}平仓${position.side === 'long' ? '多' : '空'}`,
+                            id: `${positionId}_close`,
+                            size: 1.2
+                        };
                         
-                        markerText = trade.profit >= 0 ? '盈' : '亏';
-                        markerPosition = trade.side === 'sell' ? 'aboveBar' : 'belowBar';
-                        markerSize = 4;
+                        markers.push(closeMarker);
                     } else {
-                        // 常规交易标记
-                        markerShape = trade.side === 'buy' ? 'arrowUp' : 'arrowDown';
-                        markerColor = trade.side === 'buy' ? '#26a69a' : '#ef5350';
-                        markerPosition = trade.side === 'buy' ? 'belowBar' : 'aboveBar';
-                        markerText = trade.side === 'buy' ? '买' : '卖';
+                        // 持仓中的仓位，只显示开仓标记
+                        console.log(`仓位 ${positionId} 持仓中`);
                     }
                     
-                    // 创建标记
-                    const marker = {
-                        time: tradeTime,
-                        position: markerPosition,
-                        color: markerColor,
-                        shape: markerShape,
-                        size: markerSize,
-                        text: markerText,
-                        id: tradeId // 添加ID以便后续识别
-                    };
-                    
-                    // 将时间戳转换为北京时间
-                    const formatBeijingTime = (timestamp) => {
-                        const date = new Date(timestamp * 1000);
-                        
-                        // 获取UTC时间并加上8小时得到北京时间
-                        const beijingDate = new Date(date.getTime() + (8 * 60 * 60 * 1000));
-                        
-                        // 格式化为年-月-日 时:分:秒
-                        const year = beijingDate.getUTCFullYear();
-                        const month = (beijingDate.getUTCMonth() + 1).toString().padStart(2, '0');
-                        const day = beijingDate.getUTCDate().toString().padStart(2, '0');
-                        const hours = beijingDate.getUTCHours().toString().padStart(2, '0');
-                        const minutes = beijingDate.getUTCMinutes().toString().padStart(2, '0');
-                        const seconds = beijingDate.getUTCSeconds().toString().padStart(2, '0');
-                        
-                        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} (北京时间)`;
-                    };
-                    
-                    // 存储交易详情
-                    const tradeTime_formatted = formatBeijingTime(tradeTime);
-                    
-                    tradeDetailsMap[tradeId] = {
-                        time: tradeTime_formatted,
-                        price: trade.price.toFixed(4),
-                        side: trade.side === 'buy' ? '买入' : '卖出',
-                        amount: trade.amount || 0,
-                        cost: trade.cost || (trade.price * (trade.amount || 0)),
-                        type: isOpen ? '开仓' : (isClose ? '平仓' : '交易'),
-                        position_id: trade.position_id || '',
-                        ...trade // 保存原始交易数据的所有字段
-                    };
-                    
-                    // 添加到标记数组
-                    markers.push(marker);
+                    // 存储仓位详情
+                    positionDetailsMap[`${positionId}_open`] = position;
+                    if (position.close_time) {
+                        positionDetailsMap[`${positionId}_close`] = position;
+                    }
                 });
                 
-                // 一次性设置所有标记
+                // 设置标记到主系列
                 if (markers.length > 0) {
-                    console.log('设置交易标记:', markers.length);
                     candlestickSeries.setMarkers(markers);
-                    
-                    // 将交易详情存储在全局变量中，以便点击事件可以访问
-                    window.tradeDetailsMap = tradeDetailsMap;
-                    
-                    // 创建一个交易详情提示框
-                    const tradeTooltip = document.createElement('div');
-                    tradeTooltip.id = 'trade-tooltip';
-                    tradeTooltip.style.display = 'none';
-                    container.appendChild(tradeTooltip);
-                    
-                    // 添加点击事件处理程序
-                    priceChart.subscribeCrosshairMove((param) => {
-                        if (!param || !param.hoveredObjectId) {
-                            // 如果没有悬停在标记上，隐藏提示框
-                            tradeTooltip.style.display = 'none';
-                            return;
-                        }
-                        
-                        // 检查是否悬停在交易标记上
-                        const hoveredId = param.hoveredObjectId;
-                        if (hoveredId && hoveredId.startsWith('trade-') && tradeDetailsMap[hoveredId]) {
-                            const tradeDetails = tradeDetailsMap[hoveredId];
-                            
-                            // 根据交易类型构建不同的提示内容
-                            let tooltipContent = `
-                                <div><strong>时间:</strong> ${tradeDetails.time}</div>
-                                <div><strong>类型:</strong> ${tradeDetails.type}</div>
-                                <div><strong>方向:</strong> ${tradeDetails.side}</div>
-                                <div><strong>价格:</strong> ${tradeDetails.price}</div>
-                                <div><strong>数量:</strong> ${tradeDetails.amount.toFixed(4)}</div>
-                                <div><strong>价值:</strong> ${tradeDetails.cost.toFixed(4)}</div>
-                            `;
-                            
-                            // 如果是平仓，添加盈亏信息
-                            if (tradeDetails.type === '平仓' && tradeDetails.profit !== undefined) {
-                                tooltipContent += `
-                                    <div><strong>盈亏:</strong> <span style="color:${tradeDetails.profit >= 0 ? '#26a69a' : '#ef5350'}">${tradeDetails.profit.toFixed(4)}</span></div>
-                                    <div><strong>盈亏率:</strong> <span style="color:${tradeDetails.profit_percent >= 0 ? '#26a69a' : '#ef5350'}">${tradeDetails.profit_percent.toFixed(2)}%</span></div>
-                                `;
-                            }
-                            
-                            // 更新提示框内容
-                            tradeTooltip.innerHTML = tooltipContent;
-                            
-                            // 定位提示框
-                            if (param.point) {
-                                const chartRect = container.getBoundingClientRect();
-                                const x = param.point.x + chartRect.left;
-                                const y = param.point.y + chartRect.top;
-                                
-                                // 根据点击位置调整提示框位置，避免超出视口
-                                tradeTooltip.style.left = `${x + 15}px`;
-                                tradeTooltip.style.top = `${y - 10}px`;
-                                tradeTooltip.style.display = 'block';
-                            }
-                        } else {
-                            tradeTooltip.style.display = 'none';
-                        }
-                    });
-                    
-                    // 添加点击事件处理
-                    chartContainer.addEventListener('click', (e) => {
-                        // 检查是否点击了标记 - 通过crosshairMove事件已经处理了悬停状态
-                        // 这里只需要确保点击时提示框保持可见
-                        if (tradeTooltip.style.display === 'block') {
-                            // 防止点击事件冒泡，以便提示框保持可见
-                            e.stopPropagation();
-                            
-                            // 添加一个标记，表示提示框处于"锁定"状态
-                            tradeTooltip.dataset.locked = 'true';
-                            
-                            // 添加一个关闭按钮
-                            if (!tradeTooltip.querySelector('.close-btn')) {
-                                const closeBtn = document.createElement('div');
-                                closeBtn.className = 'close-btn';
-                                closeBtn.innerHTML = '×';
-                                closeBtn.style.position = 'absolute';
-                                closeBtn.style.top = '2px';
-                                closeBtn.style.right = '5px';
-                                closeBtn.style.cursor = 'pointer';
-                                closeBtn.style.fontWeight = 'bold';
-                                closeBtn.style.color = 'white';
-                                
-                                closeBtn.addEventListener('click', (evt) => {
-                                    tradeTooltip.style.display = 'none';
-                                    tradeTooltip.dataset.locked = 'false';
-                                    evt.stopPropagation();
-                                });
-                                
-                                tradeTooltip.appendChild(closeBtn);
-                            }
-                        }
-                    });
-                    
-                    // 点击图表其他区域时关闭提示框
-                    document.addEventListener('click', () => {
-                        if (tradeTooltip.dataset.locked !== 'true') {
-                            tradeTooltip.style.display = 'none';
-                        }
-                    });
+                    console.log(`已添加 ${markers.length} 个标记到K线图`);
                 }
                 
-                // 刷新主图表，确保标记显示
+                // 清理可能已存在的tooltip元素
+                const existingTooltip = document.getElementById('position-tooltip');
+                if (existingTooltip) {
+                    existingTooltip.remove();
+                }
+                
+                // 创建工具提示元素
+                const tooltip = document.createElement('div');
+                tooltip.id = 'position-tooltip';
+                tooltip.style.cssText = `
+                    position: absolute;
+                    display: none;
+                    background: rgba(28, 32, 48, 0.95);
+                    color: #e0e3eb;
+                    padding: 12px;
+                    border-radius: 8px;
+                    font-size: 13px;
+                    z-index: 1000;
+                    pointer-events: none;
+                    max-width: 320px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                    border: 1px solid #2B2B43;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    transform: translate(0, 0);
+                    transition: opacity 0.2s ease-out;
+                    backdrop-filter: blur(4px);
+                `;
+                document.body.appendChild(tooltip);
+                
+                // 清理可能已存在的持久面板
+                const existingPanels = document.querySelectorAll('[style*="position: fixed"][style*="right: 20px"]');
+                existingPanels.forEach(panel => panel.remove());
+                
+                // 持久显示的详情面板
+                let persistentPanel = null;
+                
+                // 监听十字线移动事件 - 检测标记悬停
+                priceChart.subscribeCrosshairMove(param => {
+                    if (!param.point) {
+                        tooltip.style.opacity = '0';
                         setTimeout(() => {
-                    const currRange = priceChart.timeScale().getVisibleRange();
-                    if (currRange) {
-                        priceChart.timeScale().setVisibleRange({
-                            from: currRange.from,
-                            to: currRange.to
-                        });
+                            if (tooltip.style.opacity === '0') {
+                        tooltip.style.display = 'none';
+                            }
+                        }, 200);
+                        return;
                     }
-                }, 100);
+                    
+                    // 检查是否悬停在标记附近
+                    let hoveredMarker = null;
+                    const tolerance = 15; // 减小容差，提高精度
+                    
+                    // 遍历所有标记，找到距离鼠标最近的标记
+                    for (const marker of markers) {
+                        const markerCoordinate = priceChart.timeScale().timeToCoordinate(marker.time);
+                        if (markerCoordinate === null) continue;
+                        
+                        const horizontalDistance = Math.abs(param.point.x - markerCoordinate);
+                        
+                        // 初步水平距离过滤
+                        if (horizontalDistance > tolerance) continue;
+                            
+                        // 获取价格信息来判断垂直距离
+                        try {
+                            // 获取当前K线的信息来估算标记的垂直位置
+                            const dataPoint = chartData.candlestick.find(d => d.time === marker.time);
+                            if (!dataPoint) continue;
+                            
+                            // 根据标记位置选择合适的价格点（开仓在下方，平仓在上方）
+                            const markerPrice = marker.position === 'belowBar' ? 
+                                dataPoint.low * 0.9995 : dataPoint.high * 1.0005;
+                            
+                            // 将价格转换为坐标
+                            const priceCoordinate = candlestickSeries.priceToCoordinate(markerPrice);
+                            if (priceCoordinate === null) continue;
+                            
+                            // 检查垂直距离是否在合理范围内
+                            const verticalDistance = Math.abs(param.point.y - priceCoordinate);
+                            
+                            if (horizontalDistance <= tolerance && verticalDistance <= 40) {
+                                hoveredMarker = marker;
+                                break;
+                            }
+                        } catch (e) {
+                            // 如果价格转换失败，回退到只使用水平距离
+                            if (horizontalDistance <= tolerance/2) { // 更严格的水平容差
+                                hoveredMarker = marker;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (hoveredMarker) {
+                        const position = positionDetailsMap[hoveredMarker.id];
+                        if (position) {
+                            // 判断是开仓还是平仓标记
+                            const isOpenMarker = hoveredMarker.id.endsWith('_open');
+                            const profitColor = position.is_profit ? '#4CAF50' : '#F44336';
+                            
+                            // 显示工具提示
+                            tooltip.innerHTML = `
+                                <div style="font-weight: bold; margin-bottom: 10px; color: #ffffff; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;">
+                                    ${position.side === 'long' ? '📈 多头仓位' : '📉 空头仓位'} <span style="opacity: 0.7; font-size: 12px; float: right;">${isOpenMarker ? '开仓点' : '平仓点'}</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                    <div style="display: flex; justify-content: space-between; gap: 15px;">
+                                        <span style="color: #9aa1b9; white-space: nowrap;">开仓时间:</span> 
+                                        <span style="color: #ffffff; text-align: right;">${position.open_time_formatted}</span>
+                                </div>
+                                    <div style="display: flex; justify-content: space-between; gap: 15px;">
+                                        <span style="color: #9aa1b9; white-space: nowrap;">开仓价格:</span> 
+                                        <span style="color: #ffffff; text-align: right; font-weight: 500;">${position.open_price}</span>
+                                </div>
+                                    ${position.close_time ? `
+                                    <div style="display: flex; justify-content: space-between; gap: 15px;">
+                                        <span style="color: #9aa1b9; white-space: nowrap;">平仓时间:</span> 
+                                        <span style="color: #ffffff; text-align: right;">${position.close_time_formatted}</span>
+                                </div>
+                                    <div style="display: flex; justify-content: space-between; gap: 15px;">
+                                        <span style="color: #9aa1b9; white-space: nowrap;">平仓价格:</span> 
+                                        <span style="color: #ffffff; text-align: right; font-weight: 500;">${position.close_price}</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; gap: 15px; margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">
+                                        <span style="color: #9aa1b9; white-space: nowrap;">利润:</span> 
+                                        <span style="color: ${profitColor}; text-align: right; font-weight: bold; font-size: 15px;">
+                                            ${position.profit > 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                                        </span>
+                                    </div>
+                                    ` : `
+                                    <div style="margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px; text-align: center;">
+                                        <span style="color: #ffa726; font-weight: bold;">⚡ 持仓中</span>
+                                    </div>
+                                `}
+                                </div>
+                            `;
+                            
+                            tooltip.style.display = 'block';
+                            tooltip.style.opacity = '1';
+                            
+                            // 优化提示框位置，确保在视窗内可见
+                            const tooltipRect = tooltip.getBoundingClientRect();
+                            const viewportWidth = window.innerWidth;
+                            const viewportHeight = window.innerHeight;
+                            
+                            // 默认提示框在鼠标右侧
+                            let left = param.point.x + 15;
+                            let top = param.point.y - tooltipRect.height / 2;
+                            
+                            // 但如果右侧空间不足，则显示在左侧
+                            if (left + tooltipRect.width > viewportWidth - 10) {
+                                left = param.point.x - tooltipRect.width - 15;
+                            }
+                            
+                            // 确保不超出上下边界
+                            if (top < 10) {
+                                top = 10;
+                            } else if (top + tooltipRect.height > viewportHeight - 10) {
+                                top = viewportHeight - tooltipRect.height - 10;
+                            }
+                            
+                            tooltip.style.left = left + 'px';
+                            tooltip.style.top = top + 'px';
+                        }
+                    } else {
+                        if (tooltip.style.opacity !== '0') {
+                            tooltip.style.opacity = '0';
+                            setTimeout(() => {
+                                if (tooltip.style.opacity === '0') {
+                        tooltip.style.display = 'none';
+                                }
+                            }, 200);
+                        }
+                    }
+                });
+                
+                // 添加点击事件监听 - 显示详细仓位信息面板
+                priceChart.subscribeClick(param => {
+                    if (!param.point || !param.time) return;
+                    
+                    // 检查是否点击在标记附近
+                    let clickedMarker = null;
+                    const tolerance = 15; // 与悬停检测使用相同的容差
+                    
+                    // 使用与悬停检测相同的逻辑查找被点击的标记
+                    for (const marker of markers) {
+                        const markerCoordinate = priceChart.timeScale().timeToCoordinate(marker.time);
+                        if (markerCoordinate === null) continue;
+                        
+                        const horizontalDistance = Math.abs(param.point.x - markerCoordinate);
+                        if (horizontalDistance > tolerance) continue;
+                            
+                        try {
+                            // 获取当前K线的信息来估算标记的垂直位置
+                            const dataPoint = chartData.candlestick.find(d => d.time === marker.time);
+                            if (!dataPoint) continue;
+                            
+                            // 根据标记位置选择合适的价格点
+                            const markerPrice = marker.position === 'belowBar' ? 
+                                dataPoint.low * 0.9995 : dataPoint.high * 1.0005;
+                            
+                            // 将价格转换为坐标
+                            const priceCoordinate = candlestickSeries.priceToCoordinate(markerPrice);
+                            if (priceCoordinate === null) continue;
+                            
+                            // 检查垂直距离是否在合理范围内
+                            const verticalDistance = Math.abs(param.point.y - priceCoordinate);
+                            
+                            if (horizontalDistance <= tolerance && verticalDistance <= 40) {
+                                clickedMarker = marker;
+                                break;
+                            }
+                        } catch (e) {
+                            // 如果价格转换失败，回退到只使用水平距离
+                            if (horizontalDistance <= tolerance/2) { // 更严格的水平容差
+                                clickedMarker = marker;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (clickedMarker) {
+                        const position = positionDetailsMap[clickedMarker.id];
+                        if (position) {
+                            // 移除之前的持久面板
+                            if (persistentPanel) {
+                                persistentPanel.remove();
+                            }
+                            
+                            const profitColor = position.is_profit ? '#4CAF50' : '#F44336';
+                            const bgColor = position.is_profit ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)';
+                            
+                            // 创建持久显示面板
+                            persistentPanel = document.createElement('div');
+                            persistentPanel.style.cssText = `
+                                position: fixed;
+                                top: 80px;
+                                right: 20px;
+                                background: #1c2030;
+                                border: 1px solid #2B2B43;
+                                border-radius: 12px;
+                                padding: 20px;
+                                box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                                z-index: 1001;
+                                min-width: 280px;
+                                max-width: 350px;
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                                color: #e0e3eb;
+                                backdrop-filter: blur(10px);
+                                transform: translateX(100%);
+                                transition: transform 0.3s ease-out;
+                            `;
+                            
+                            persistentPanel.innerHTML = `
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h3 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 600;">
+                                        📊 仓位详情
+                                    </h3>
+                                    <button onclick="this.parentElement.parentElement.remove()" 
+                                            style="background: rgba(255,255,255,0.1); border: none; border-radius: 6px; 
+                                                   width: 28px; height: 28px; font-size: 16px; cursor: pointer; 
+                                                   color: #9aa1b9; transition: all 0.2s;"
+                                            onmouseover="this.style.background='rgba(255,255,255,0.2)'"
+                                            onmouseout="this.style.background='rgba(255,255,255,0.1)'">×</button>
+                                </div>
+                                
+                                <div style="background: ${bgColor}; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                                    <div style="font-size: 16px; font-weight: 600; color: ${profitColor}; margin-bottom: 4px;">
+                                        ${position.side === 'long' ? '📈 多头仓位' : '📉 空头仓位'}
+                                    </div>
+                                    <div style="font-size: 14px; color: #9aa1b9;">
+                                        仓位 ID: <span style="color: #ffffff; font-family: monospace;">${position.position_id}</span>
+                                    </div>
+                                </div>
+                                
+                                <div style="line-height: 1.8; font-size: 14px;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                        <span style="color: #9aa1b9;">数量:</span>
+                                        <span style="color: #ffffff; font-weight: 500;">${position.amount}</span>
+                                    </div>
+                                    
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                        <span style="color: #9aa1b9;">开仓时间:</span>
+                                        <span style="color: #ffffff; font-size: 12px;">${position.open_time_formatted}</span>
+                                    </div>
+                                    
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                        <span style="color: #9aa1b9;">开仓价格:</span>
+                                        <span style="color: #ffffff; font-weight: 500; font-family: monospace;">${position.open_price}</span>
+                                    </div>
+                                    
+                                    ${position.close_time_formatted && position.close_time_formatted !== '持仓中' ? `
+                                        <hr style="border: none; border-top: 1px solid #2B2B43; margin: 12px 0;">
+                                        
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                            <span style="color: #9aa1b9;">平仓时间:</span>
+                                            <span style="color: #ffffff; font-size: 12px;">${position.close_time_formatted}</span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                            <span style="color: #9aa1b9;">平仓价格:</span>
+                                            <span style="color: #ffffff; font-weight: 500; font-family: monospace;">${position.close_price}</span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                            <span style="color: #9aa1b9;">利润:</span>
+                                            <span style="color: ${profitColor}; font-weight: 600; font-size: 16px;">
+                                                ${position.profit > 0 ? '+' : ''}${Number(position.profit).toFixed(2)}
+                                            </span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: #9aa1b9;">状态:</span>
+                                            <span style="color: ${profitColor}; font-weight: 600;">
+                                                ${position.is_profit ? '✅ 盈利' : '❌ 亏损'}
+                                            </span>
+                                        </div>
+                                    ` : `
+                                        <hr style="border: none; border-top: 1px solid #2B2B43; margin: 12px 0;">
+                                        <div style="text-align: center; color: #ffa726; font-weight: 600; font-size: 16px;">
+                                            ⚡ 持仓中
+                                        </div>
+                                        <div style="text-align: center; color: #9aa1b9; font-size: 12px; margin-top: 4px;">
+                                            当前未平仓状态
+                                        </div>
+                                    `}
+                                </div>
+                            `;
+                            
+                            document.body.appendChild(persistentPanel);
+                            
+                            // 添加动画效果
+                            setTimeout(() => {
+                                persistentPanel.style.transform = 'translateX(0)';
+                            }, 10);
+                        }
+                    }
+                });
+                
+                console.log(`✅ 仓位标记添加完成: ${markers.length} 个标记`);
+                
             } catch (error) {
-                console.error('添加交易标记失败:', error);
+                console.error('❌ 添加仓位标记时出错:', error);
             }
         }
         
