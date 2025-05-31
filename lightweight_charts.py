@@ -1561,7 +1561,37 @@ def create_app():
                     padding: 0;
                 }
                 
-                /* 响应式调整 */
+                /* 自定义左侧栏样式 */
+                
+                /* 修改控制面板的滚动行为 */
+
+                
+                .control-panel::-webkit-scrollbar {
+                    width: 6px;
+                }
+                
+                .control-panel::-webkit-scrollbar-track {
+                    background: #121722;
+                }
+                
+                .control-panel::-webkit-scrollbar-thumb {
+                    background-color: #2B2B43;
+                    border-radius: 6px;
+                }
+                
+                /* 美化卡片样式 */
+                .custom-card {
+                    background-color: rgba(19, 23, 34, 0.6);
+                    border-radius: 8px;
+                    border: 1px solid rgba(43, 43, 67, 0.8);
+                    transition: all 0.3s ease;
+                }
+                
+                .custom-card:hover {
+                    border-color: rgba(43, 43, 67, 1);
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+                }
+                
                 @media (max-width: 1200px) {
                     .symbol-grid {
                         grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
@@ -1670,7 +1700,7 @@ def create_app():
                                 className="symbol-grid"
                             )
                         ], className="p-2")
-                    ], className="mb-3 border-secondary"),
+                    ], className="mb-3 border-secondary custom-card"),
                     
                     # 控制面板卡片
                     dbc.Card([
@@ -1812,7 +1842,7 @@ def create_app():
                                                 ], width=12, className="d-flex align-items-center"),
                                             ])
                                         ], className="py-2 px-3")
-                                    ], className="border-light bg-dark")
+                                    ], className="border-light bg-dark custom-card")
                                 ], width=12, className="mb-3"),
                                 
                                 # 状态信息区域
@@ -1822,9 +1852,9 @@ def create_app():
                                 ], width=12),
                             ]),
                         ], className="p-3")
-                    ], className="border-secondary"),
-                ], className="control-panel"),
-            ], width=3, className="pe-2"),
+                    ], className="border-secondary custom-card"),
+                ], className="control-panel", style={"padding-right": "10px"}),
+            ], id="left-sidebar", width=2, className="pe-2 custom-sidebar", style={"box-shadow": "2px 0 10px rgba(0, 0, 0, 0.2)"}),
             
             # 右侧区域 - 图表（80%宽度）
             dbc.Col([
@@ -1846,9 +1876,9 @@ def create_app():
                             id="chart-info",
                             className="mt-2"
                         )
-                    ], className="p-0")
-                ], className="border-secondary chart-card"),
-            ], width=9, className="ps-2"),
+                    ], className="p-2")
+                ], className="border-secondary chart-card", style={"background-color": "#131722", "border-radius": "8px", "overflow": "hidden"}),
+            ], width=10, className="ps-1", style={"padding-left": "12px"}),  # 增加左侧内边距
         ], className="g-0"),  # 去除行间距
         
         # 数据存储
@@ -1911,7 +1941,11 @@ def create_app():
         # 加载动画
         dbc.Spinner(html.Div(id="loading-spinner"), color="primary"),
         
-    ], fluid=True, className="bg-dark text-light p-3")
+    ], fluid=True, className="bg-dark text-light p-3", style={
+        "background": "linear-gradient(to bottom, #0a0e17, #131722)",
+        "min-height": "100vh",
+        "padding": "15px 20px"
+    })
     
     # 注册客户端回调函数
     app.clientside_callback(
