@@ -332,6 +332,22 @@ const addGlobalStyles = () => {
             opacity: 1 !important;
             animation: panelHighlight 2s infinite ease-in-out;
         }
+        
+        /* 加载更多按钮动画 */
+        @keyframes pulse {
+            0% { transform: translateY(-50%) scale(1); }
+            50% { transform: translateY(-50%) scale(1.05); }
+            100% { transform: translateY(-50%) scale(1); }
+        }
+        
+        .load-more-button {
+            animation: pulse 2s infinite ease-in-out;
+            user-select: none;
+        }
+        
+        .load-more-button:active {
+            transform: translateY(-48%) scale(0.97);
+        }
     `;
     document.head.appendChild(style);
 };
@@ -392,6 +408,126 @@ const createFullscreenButton = (container) => {
     // 添加到容器
     container.appendChild(fullscreenBtn);
     return fullscreenBtn;
+};
+
+// 创建"加载更多"按钮函数
+const createLoadMoreButton = (container, chart) => {
+    // 检查是否已经有加载更多按钮
+    if (container.querySelector('.load-more-button')) {
+        return container.querySelector('.load-more-button');
+    }
+    
+    // 创建加载更多按钮
+    const loadMoreBtn = document.createElement('div');
+    loadMoreBtn.className = 'load-more-button';
+    loadMoreBtn.innerText = '加载更多';
+    
+    // 设置按钮样式
+    Object.assign(loadMoreBtn.style, {
+        position: 'absolute',
+        right: '50px',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        padding: '8px 12px',
+        backgroundColor: 'rgba(33, 150, 243, 0.8)',
+        color: 'white',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        zIndex: 10,
+        transition: 'all 0.2s ease',
+        opacity: '0',
+        pointerEvents: 'none',
+        fontFamily: 'sans-serif',
+        fontSize: '12px',
+        boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+    });
+
+    // 添加悬停效果
+    loadMoreBtn.addEventListener('mouseover', () => {
+        loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 1)';
+    });
+    
+    loadMoreBtn.addEventListener('mouseout', () => {
+        loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.8)';
+    });
+    
+    // 添加加载更多功能
+    loadMoreBtn.addEventListener('click', () => {
+        loadMoreBtn.innerText = '加载中...';
+        loadMoreBtn.style.backgroundColor = 'rgba(150, 150, 150, 0.8)';
+        loadMoreBtn.style.cursor = 'wait';
+        
+        // 触发自定义事件，通知Dash需要加载更多数据
+        const loadMoreEvent = new CustomEvent('loadMoreKlines', {
+            detail: {
+                // 获取当前最右边的时间戳作为下一批数据的起始点
+                lastTimestamp: chart.timeScale().getVisibleRange().to
+            }
+        });
+        document.dispatchEvent(loadMoreEvent);
+        
+        // 创建一个隐藏的输入元素来传递数据给Dash
+        let loadMoreTrigger = document.getElementById('load-more-trigger');
+        if (!loadMoreTrigger) {
+            loadMoreTrigger = document.createElement('input');
+            loadMoreTrigger.id = 'load-more-trigger';
+            loadMoreTrigger.type = 'hidden';
+            loadMoreTrigger.value = '0';
+            document.body.appendChild(loadMoreTrigger);
+        }
+        
+        // 更新值以触发Dash回调
+        loadMoreTrigger.value = parseInt(loadMoreTrigger.value || '0') + 1;
+        
+        // 触发change事件
+        const event = new Event('change');
+        loadMoreTrigger.dispatchEvent(event);
+    });
+    
+    // 添加到容器
+    container.appendChild(loadMoreBtn);
+    return loadMoreBtn;
+};
+
+// 检测图表滚动到最右侧并显示加载更多按钮
+const setupLoadMoreDetection = (chart, container) => {
+    const loadMoreBtn = createLoadMoreButton(container, chart);
+    
+    // 检测图表滚动位置
+    const checkRightEdge = () => {
+        try {
+            const timeScale = chart.timeScale();
+            const logicalRange = timeScale.getVisibleLogicalRange();
+            const barCount = chartData.candlestick.length;
+            
+            // 如果可见范围接近右边缘（最后30个K线）
+            if (logicalRange && barCount > 0 && (barCount - logicalRange.to) < 30) {
+                loadMoreBtn.style.opacity = '1';
+                loadMoreBtn.style.pointerEvents = 'auto';
+            } else {
+                loadMoreBtn.style.opacity = '0';
+                loadMoreBtn.style.pointerEvents = 'none';
+            }
+        } catch (e) {
+            console.error('检查右边缘时出错:', e);
+        }
+    };
+    
+    // 监听图表滚动事件
+    chart.timeScale().subscribeVisibleLogicalRangeChange(checkRightEdge);
+    
+    // 定期检查位置（以防止某些情况下事件未触发）
+    setInterval(checkRightEdge, 1000);
+    
+    // 返回卸载函数
+    return {
+        unsubscribe: () => {
+            const handler = chart.timeScale().subscribeVisibleLogicalRangeChange(checkRightEdge);
+            if (handler && typeof handler.unsubscribe === 'function') {
+                handler.unsubscribe();
+            }
+        }
+    };
 };
 
 // 初始化客户端命名空间
@@ -2284,6 +2420,12 @@ window.dash_clientside.clientside = {
         window.addEventListener('resize', () => {
             setTimeout(adjustContainerHeights, 100);
         });
+        
+        // 全局存储图表数据，供加载更多功能使用
+        window.chartData = chartData;
+        
+        // 添加加载更多按钮和检测逻辑
+        setupLoadMoreDetection(priceChart, chartContainer);
         
         // 返回null（Dash回调需要返回值）
         return null;
