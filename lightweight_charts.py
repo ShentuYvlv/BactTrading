@@ -1697,8 +1697,8 @@ def create_app():
             dbc.Col([
                 html.Div([
                     # 币种选择卡片
-                    dbc.Card([
-                        dbc.CardBody([
+        dbc.Card([
+            dbc.CardBody([
                             html.H6("交易币种 (交易次数 ≥ 5)", className="mb-3 text-center"),
                             html.Div(
                                 symbol_items,
@@ -1711,188 +1711,191 @@ def create_app():
                     # 控制面板卡片
                     dbc.Card([
                         dbc.CardBody([
-                            # 交易对选择
+                    # 交易对选择
                             dbc.Row([
-                                dbc.Col([
-                                    html.Label("交易对", className="form-label mb-1"),
-                                    dcc.Input(
-                                        id="symbol-input",
-                                        type="text",
-                                        value="NXPC/USDT:USDT",
+                    dbc.Col([
+                        html.Label("交易对", className="form-label mb-1"),
+                        dcc.Input(
+                            id="symbol-input",
+                            type="text",
+                            value="NXPC/USDT:USDT",
                                         className="form-control form-control-sm w-100"
-                                    )
+                        )
                                 ], width=12, className="mb-2"),
-                            
-                                # 时间周期选择
-                                dbc.Col([
-                                    html.Label("时间周期", className="form-label mb-1"),
-                                    dcc.Dropdown(
-                                        id="timeframe-dropdown",
-                                        options=timeframe_options,
-                                        value="1h",
-                                        clearable=False,
-                                        className="dash-dropdown-sm"
-                                    )
+                    
+                    # 时间周期选择
+                    dbc.Col([
+                        html.Label("时间周期", className="form-label mb-1"),
+                        dcc.Dropdown(
+                            id="timeframe-dropdown",
+                            options=timeframe_options,
+                            value="1h",
+                            clearable=False,
+                            className="dash-dropdown-sm"
+                        )
                                 ], width=12, className="mb-2"),
-                            
-                                # 开始日期选择
-                                dbc.Col([
-                                    html.Label("开始日期", className="form-label mb-1"),
-                                    dcc.DatePickerSingle(
-                                        id="start-date-picker",
+                    
+                    # 开始日期选择
+                    dbc.Col([
+                        html.Label("开始日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="start-date-picker",
                                         date=datetime(2025, 5, 15).date(),
-                                        display_format="YYYY-MM-DD",
-                                        className="w-100"
-                                    )
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
                                 ], width=12, className="mb-2"),
-                            
-                                # 结束日期选择
-                                dbc.Col([
-                                    html.Label("结束日期", className="form-label mb-1"),
-                                    dcc.DatePickerSingle(
-                                        id="end-date-picker",
+                    
+                    # 结束日期选择
+                    dbc.Col([
+                        html.Label("结束日期", className="form-label mb-1"),
+                        dcc.DatePickerSingle(
+                            id="end-date-picker",
                                         date=datetime(2025, 5, 16).date(),
-                                        display_format="YYYY-MM-DD",
-                                        className="w-100"
-                                    )
+                            display_format="YYYY-MM-DD",
+                            className="w-100"
+                        )
                                 ], width=12, className="mb-3"),
-                            
-                                # 按钮组
-                                dbc.Col([
-                                    dbc.ButtonGroup([
-                                        dbc.Button(
-                                            "加载数据", 
-                                            id="load-data-button", 
-                                            color="primary", 
-                                            size="sm",
-                                            className="me-1"
-                                        ),
-                                        dbc.Button(
-                                            "重置图表", 
-                                            id="reset-chart-button", 
-                                            color="secondary", 
-                                            size="sm"
-                                        )
-                                    ], className="w-100")
+                    
+                    # 按钮组
+                    dbc.Col([
+                        dbc.ButtonGroup([
+                            dbc.Button(
+                                "加载数据", 
+                                id="load-data-button", 
+                                color="primary", 
+                                size="sm",
+                                className="me-1"
+                            ),
+                            dbc.Button(
+                                "重置图表", 
+                                id="reset-chart-button", 
+                                color="secondary", 
+                                size="sm"
+                            )
+                        ], className="w-100")
                                 ], width=12, className="mb-3"),
-                        
+                
                                 # 指标选项区域
-                                dbc.Col([
+                    dbc.Col([
                                     html.Label("指标选项", className="form-label mb-1"),
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            # 显示交易记录选项
+                        dbc.Card([
+                            dbc.CardBody([
+                                    # 显示交易记录选项
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-trades-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "交易记录",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-trades-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "交易记录",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示EMA20选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-ema-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "EMA20",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示EMA20选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-ema-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "EMA20",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示布林带选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-bollinger-checkbox",
-                                                        className="form-check-input",
-                                                        value=False,
-                                                    ),
-                                                    html.Label(
-                                                        "布林带",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示布林带选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-bollinger-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "布林带",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示RSI指标选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-rsi-checkbox",
-                                                        className="form-check-input",
-                                                        value=True,
-                                                    ),
-                                                    html.Label(
-                                                        "RSI",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示RSI指标选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-rsi-checkbox",
+                                            className="form-check-input",
+                                            value=True,
+                                        ),
+                                        html.Label(
+                                            "RSI",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center mb-1"),
-                                                
-                                                # 显示MACD指标选项
-                                                dbc.Col([
-                                                    dbc.Checkbox(
-                                                        id="show-macd-checkbox",
-                                                        className="form-check-input",
-                                                        value=False,
-                                                    ),
-                                                    html.Label(
-                                                        "MACD",
-                                                        className="form-check-label ms-2 small"
-                                                    ),
+                                    
+                                    # 显示MACD指标选项
+                                    dbc.Col([
+                                        dbc.Checkbox(
+                                            id="show-macd-checkbox",
+                                            className="form-check-input",
+                                            value=False,
+                                        ),
+                                        html.Label(
+                                            "MACD",
+                                            className="form-check-label ms-2 small"
+                                        ),
                                                 ], width=12, className="d-flex align-items-center"),
                                             ])
                                         ], className="py-2 px-3")
                                     ], className="border-light bg-dark custom-card")
                                 ], width=12, className="mb-3"),
-                        
+                    
                                 # 状态信息区域
-                                dbc.Col([
+                    dbc.Col([
                                     html.Label("状态信息", className="form-label mb-1"),
                                     html.Div(id="status-info", className="small p-2 border border-secondary rounded bg-dark")
                                 ], width=12),
-                        
+                    
                                 # 添加隐藏的加载更多K线触发器
                                 html.Div(dbc.Input(id="load-more-trigger", type="hidden", value=0), style={"display": "none"}),
                                 
-                                # 添加调试按钮
-                                dbc.Col([
-                                    html.Label("调试工具", className="form-label mb-1"),
-                                    dbc.Button(
-                                        "检查标记元素", 
-                                        id="debug-markers-button", 
-                                        color="warning", 
-                                        size="sm",
-                                        className="w-100 mb-2"
-                                    ),
-                                    dcc.Store(id="debug-info-store"),
-                                    html.Div(id="debug-info-output", className="small text-muted mt-1")
-                                ], width=12, className="mb-3"),
+                                # 添加辅助按钮，用于确保加载更多功能可以触发
+                                html.Button(id="load-more-helper-button", style={"display": "none"}),
+                                
+                    # 添加调试按钮
+                    dbc.Col([
+                        html.Label("调试工具", className="form-label mb-1"),
+                        dbc.Button(
+                            "检查标记元素", 
+                            id="debug-markers-button", 
+                            color="warning", 
+                            size="sm",
+                            className="w-100 mb-2"
+                        ),
+                        dcc.Store(id="debug-info-store"),
+                        html.Div(id="debug-info-output", className="small text-muted mt-1")
+                    ], width=12, className="mb-3"),
                             ]) # 关闭 dbc.Row 内部
                         ], className="p-2") # 关闭 dbc.CardBody
                     ], className="custom-card") # 关闭 dbc.Card (控制面板卡片)
                 ], className="control-panel", style={"padding-right": "10px"}) # 关闭 html.Div (左侧Col内部)
             ], id="left-sidebar", width=2, className="pe-2 custom-sidebar", style={"box-shadow": "2px 0 10px rgba(0, 0, 0, 0.2)"}), # 关闭 dbc.Col (左侧)
-            
+        
             # 右侧区域 - 图表（80%宽度）
             dbc.Col([
                 # 图表卡片
-                dbc.Card([
-                    dbc.CardBody([
-                        # 图表容器
-                        html.Div(
-                            id="chart-container",
+        dbc.Card([
+            dbc.CardBody([
+                # 图表容器
+                html.Div(
+                    id="chart-container",
                             className="chart-wrapper",
-                            style={
-                                "width": "100%",
-                                "position": "relative"
-                            }
-                        ),
+                    style={
+                        "width": "100%",
+                        "position": "relative"
+                    }
+                ),
                         
                         # 交互信息显示区
                         html.Div(
@@ -1904,14 +1907,14 @@ def create_app():
             ], width=10, className="ps-1", style={"padding-left": "12px"}),  # 增加左侧内边距
         ], className="g-0"),  # 去除行间距，这是dbc.Row的结束
                 
-        # 数据存储
-        dcc.Store(id="chart-data-store"),
-        dcc.Store(id="trades-data-store"),
+                # 数据存储
+                dcc.Store(id="chart-data-store"),
+                dcc.Store(id="trades-data-store"),
         dcc.Store(id="positions-data-store"),
-        
-        # 添加chart-interaction元素到初始布局
-        html.Div(id="chart-interaction", style={"display": "none"}),
-        
+                
+                # 添加chart-interaction元素到初始布局
+                html.Div(id="chart-interaction", style={"display": "none"}),
+                
         # 导航控制器（可拖动）
         html.Div([
             html.Div([
@@ -2417,6 +2420,33 @@ def create_app():
         prevent_initial_call=True
     )
     
+    # 添加重置加载更多按钮状态的客户端回调
+    app.clientside_callback(
+        """
+        function(chartData) {
+            // 图表数据更新后，重置加载更多按钮
+            if (chartData) {
+                try {
+                    console.log("检测到图表数据更新，准备重置加载更多按钮");
+                    const loadMoreBtn = document.querySelector('.load-more-button');
+                    if (loadMoreBtn && loadMoreBtn.innerText === '加载中...') {
+                        loadMoreBtn.innerText = '加载更多';
+                        loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                        loadMoreBtn.style.cursor = 'pointer';
+                        console.log('数据已更新，重置加载更多按钮状态');
+                    }
+                } catch (e) {
+                    console.error('重置加载更多按钮状态时出错:', e);
+                }
+            }
+            return null;
+        }
+        """,
+        Output("load-more-helper-button", "n_clicks", allow_duplicate=True),
+        [Input("chart-data-store", "data")],
+        prevent_initial_call=True
+    )
+    
     # 最后添加一个调试按钮的回调
     # 添加调试按钮的客户端回调
     app.clientside_callback(
@@ -2531,14 +2561,23 @@ def create_app():
         prevent_initial_call=True
     )
     def load_more_klines(trigger_value, current_chart_data, symbol, timeframe, end_date):
+        # 强制打印调试信息
+        print("========== 加载更多K线被触发 ==========")
+        print(f"触发值: {trigger_value}")
+        print(f"交易对: {symbol}, 周期: {timeframe}")
+        
         if not trigger_value or trigger_value == 0 or not current_chart_data:
+            print("触发值无效或没有现有数据，取消操作")
             return dash.no_update, dash.no_update
+        
+        logger.info(f"加载更多K线触发，当前触发值: {trigger_value}")
         
         try:
             # 解析当前图表数据
             chart_data = json.loads(current_chart_data)
             
             if not chart_data or not chart_data.get('candlestick', []):
+                print("没有有效的K线数据可以扩展")
                 return dash.no_update, html.Div("没有现有数据可以扩展", className="text-warning")
             
             # 获取当前数据的最后一个K线时间
@@ -2549,12 +2588,13 @@ def create_app():
             if last_timestamp < 10000000000:
                 last_timestamp = last_timestamp * 1000
                 
+            print(f"最后一根K线时间戳: {last_timestamp} ({pd.to_datetime(last_timestamp, unit='ms')})")
             logger.info(f"正在从时间 {last_timestamp} ({pd.to_datetime(last_timestamp, unit='ms')}) 加载更多K线")
             
-            # 计算新的开始时间和结束时间
-            since = last_timestamp
+            # 确保开始时间大于最后一个K线的时间，避免数据重叠
+            since = last_timestamp + 1
             
-            # 计算结束时间，默认向后加载1000根K线
+            # 计算结束时间，默认向后加载一定数量的K线
             # 根据时间周期计算时间增量
             time_increment_map = {
                 '1m': 1 * 60 * 1000,   # 1分钟，以毫秒计
@@ -2566,43 +2606,295 @@ def create_app():
             }
             
             time_increment = time_increment_map.get(timeframe, 60 * 60 * 1000)  # 默认1小时
-            until = since + (time_increment * 1000)  # 加载1000根K线
+            # 加载300根K线而不是1000根，减少数据量
+            candles_to_load = 300
+            until = since + (time_increment * candles_to_load)
             
             # 如果until超过了当前时间，使用当前时间
             current_time = int(datetime.now().timestamp() * 1000)
             until = min(until, current_time)
             
+            print(f"请求时间范围: {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             logger.info(f"加载更多K线: 从 {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             
-            # 获取更多K线数据
-            df_more = fetch_ohlcv_data(exchange, symbol, timeframe, since, until)
+            # 获取更多K线数据 - 禁用缓存以确保获取新数据
+            try:
+                # 确保交易对格式正确
+                if ':' not in symbol and symbol.endswith('USDT'):
+                    # 如果是U本位合约但没有正确格式，添加:USDT后缀
+                    symbol = f"{symbol}:USDT"
+                    print(f"调整交易对格式为: {symbol}")
+                    logger.info(f"调整交易对格式为: {symbol}")
+                
+                # 初始化交易所
+                print("正在初始化交易所...")
+                exchange_instance = initialize_exchange()
+                
+                # 直接从交易所获取数据，不使用缓存
+                params = {
+                    'startTime': since,
+                    'endTime': until
+                }
+                
+                print(f"直接从交易所获取数据，参数: {params}")
+                logger.info(f"直接从交易所获取数据，参数: {params}")
+                
+                # 获取数据
+                print(f"正在调用交易所API: fetch_ohlcv({symbol}, {timeframe}, limit=1000, params={params})")
+                all_ohlcv = exchange_instance.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=1000,  # 最大限制
+                    params=params
+                )
+                
+                print(f"成功从交易所获取了 {len(all_ohlcv)} 条新K线数据")
+                logger.info(f"成功从交易所获取了 {len(all_ohlcv)} 条新K线数据")
+                
+                if not all_ohlcv or len(all_ohlcv) == 0:
+                    print("没有找到更多K线数据")
+                    return dash.no_update, html.Div("没有找到更多K线数据", className="text-warning p-2 border border-warning rounded")
+                
+                # 转换为DataFrame
+                df_more = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                
+                # 转换时间戳为日期时间
+                df_more['timestamp'] = pd.to_datetime(df_more['timestamp'], unit='ms')
+                
+                # 添加计算技术指标
+                df_more = add_technical_indicators(df_more)
+                
+                print(f"已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
+                logger.info(f"已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
+            
+            except Exception as e:
+                print(f"直接从交易所获取数据失败: {str(e)}")
+                logger.error(f"直接从交易所获取数据失败: {str(e)}")
+                import traceback
+                error_trace = traceback.format_exc()
+                print(error_trace)
+                logger.error(error_trace)
+                
+                # 尝试使用常规方法获取
+                print("尝试使用常规方法获取数据...")
+                # 这里修复一个问题：使用新初始化的exchange_instance而不是全局exchange
+                df_more = fetch_ohlcv_data(exchange_instance, symbol, timeframe, since, until)
             
             if df_more.empty:
+                print("没有获取到更多K线数据")
                 return dash.no_update, html.Div("没有更多K线数据可用", className="text-warning p-2 border border-warning rounded")
             
             # 准备新的K线数据
             more_chart_data = prepare_data_for_chart(df_more)
             
+            # 检查获取的数据是否与现有数据连续
+            print(f"现有数据最后一个K线时间戳: {last_timestamp}")
+            print(f"新数据第一个K线时间戳: {df_more['timestamp'].iloc[0].timestamp() * 1000}")
+            logger.info(f"现有数据最后一个K线时间戳: {last_timestamp}")
+            logger.info(f"新数据第一个K线时间戳: {df_more['timestamp'].iloc[0].timestamp() * 1000}")
+            
             # 合并数据 - 删除第一个元素以避免与最后一个K线重复
+            new_items_added = 0
             for key in more_chart_data:
                 if key in chart_data and isinstance(chart_data[key], list) and isinstance(more_chart_data[key], list):
+                    # 记录合并前的数量
+                    original_count = len(chart_data[key])
+                    
                     # 跳过第一个元素以避免重复
                     chart_data[key].extend(more_chart_data[key][1:])
+                    
+                    # 记录新增的数量
+                    new_items_added = len(chart_data[key]) - original_count
+                    print(f"合并数据: {key} - 原始: {original_count}, 新增: {new_items_added}, 总计: {len(chart_data[key])}")
+                    logger.info(f"合并数据: {key} - 原始: {original_count}, 新增: {new_items_added}, 总计: {len(chart_data[key])}")
             
             # 返回合并后的数据和状态信息
-            status_info = html.Div(
-                f"已加载额外的 {len(df_more) - 1} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
-                className="text-success p-2 border border-success rounded"
-            )
-            
-            return json.dumps(chart_data), status_info
+            if new_items_added > 0:
+                status_info = html.Div(
+                    f"已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
+                    className="text-success p-2 border border-success rounded"
+                )
+                print(f"成功加载了 {new_items_added} 根新K线数据")
+                return json.dumps(chart_data), status_info
+            else:
+                print("未找到新的K线数据")
+                return dash.no_update, html.Div("未找到新的K线数据", className="text-warning p-2 border border-warning rounded")
             
         except Exception as e:
+            print(f"加载更多K线数据出错: {str(e)}")
             logger.error(f"加载更多K线数据出错: {str(e)}")
             import traceback
-            logger.error(traceback.format_exc())
+            error_trace = traceback.format_exc()
+            print(error_trace)
+            logger.error(error_trace)
             return dash.no_update, html.Div(f"加载更多数据出错: {str(e)}", className="text-danger p-2 border border-danger rounded")
-
+    
+    # 添加辅助按钮的回调，用于确保"加载更多"功能正常工作
+    @app.callback(
+        [Output("chart-data-store", "data", allow_duplicate=True), 
+         Output("status-info", "children", allow_duplicate=True)],
+        [Input("load-more-helper-button", "n_clicks")],
+        [State("load-more-trigger", "value"),
+         State("chart-data-store", "data"), 
+         State("symbol-input", "value"), 
+         State("timeframe-dropdown", "value"),
+         State("end-date-picker", "date")],
+        prevent_initial_call=True
+    )
+    def load_more_klines_helper(n_clicks, trigger_value, current_chart_data, symbol, timeframe, end_date):
+        """辅助函数，确保加载更多功能可以正常工作"""
+        # 强制打印调试信息
+        print("========== 辅助加载更多K线被触发 ==========")
+        print(f"按钮点击: {n_clicks}, 触发值: {trigger_value}")
+        print(f"交易对: {symbol}, 周期: {timeframe}")
+        
+        if not n_clicks or not trigger_value or trigger_value == 0 or not current_chart_data:
+            print("按钮点击无效或没有现有数据，取消操作")
+            return dash.no_update, dash.no_update
+        
+        logger.info(f"辅助按钮被点击，触发值: {trigger_value}, n_clicks: {n_clicks}")
+        
+        try:
+            # 解析当前图表数据
+            chart_data = json.loads(current_chart_data)
+            
+            if not chart_data or not chart_data.get('candlestick', []):
+                print("[辅助] 没有有效的K线数据可以扩展")
+                return dash.no_update, html.Div("没有现有数据可以扩展", className="text-warning")
+            
+            # 获取当前数据的最后一个K线时间
+            last_kline = chart_data['candlestick'][-1]
+            last_timestamp = last_kline['time']
+            
+            # 如果是秒级时间戳，转换为毫秒
+            if last_timestamp < 10000000000:
+                last_timestamp = last_timestamp * 1000
+                
+            print(f"[辅助] 最后一根K线时间戳: {last_timestamp} ({pd.to_datetime(last_timestamp, unit='ms')})")
+            logger.info(f"[辅助] 正在从时间 {last_timestamp} ({pd.to_datetime(last_timestamp, unit='ms')}) 加载更多K线")
+            
+            # 确保开始时间大于最后一个K线的时间，避免数据重叠
+            since = last_timestamp + 1
+            
+            # 计算结束时间，默认向后加载一定数量的K线
+            # 根据时间周期计算时间增量
+            time_increment_map = {
+                '1m': 1 * 60 * 1000,   # 1分钟，以毫秒计
+                '5m': 5 * 60 * 1000,   # 5分钟
+                '15m': 15 * 60 * 1000, # 15分钟
+                '1h': 60 * 60 * 1000,  # 1小时
+                '4h': 4 * 60 * 60 * 1000, # 4小时
+                '1d': 24 * 60 * 60 * 1000, # 1天
+            }
+            
+            time_increment = time_increment_map.get(timeframe, 60 * 60 * 1000)  # 默认1小时
+            # 加载300根K线而不是1000根，减少数据量
+            candles_to_load = 300
+            until = since + (time_increment * candles_to_load)
+            
+            # 如果until超过了当前时间，使用当前时间
+            current_time = int(datetime.now().timestamp() * 1000)
+            until = min(until, current_time)
+            
+            print(f"[辅助] 请求时间范围: {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
+            logger.info(f"[辅助] 加载更多K线: 从 {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
+            
+            # 获取更多K线数据 - 禁用缓存以确保获取新数据
+            try:
+                # 确保交易对格式正确
+                if ':' not in symbol and symbol.endswith('USDT'):
+                    # 如果是U本位合约但没有正确格式，添加:USDT后缀
+                    symbol = f"{symbol}:USDT"
+                    print(f"[辅助] 调整交易对格式为: {symbol}")
+                    logger.info(f"[辅助] 调整交易对格式为: {symbol}")
+                
+                # 初始化交易所
+                print("[辅助] 正在初始化交易所...")
+                exchange_instance = initialize_exchange()
+                
+                # 直接从交易所获取数据，不使用缓存
+                params = {
+                    'startTime': since,
+                    'endTime': until
+                }
+                
+                logger.info(f"[辅助] 直接从交易所获取数据，参数: {params}")
+                
+                # 获取数据
+                all_ohlcv = exchange_instance.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=1000,  # 最大限制
+                    params=params
+                )
+                
+                logger.info(f"[辅助] 成功从交易所获取了 {len(all_ohlcv)} 条新K线数据")
+                
+                if not all_ohlcv or len(all_ohlcv) == 0:
+                    return dash.no_update, html.Div("[辅助] 没有找到更多K线数据", className="text-warning p-2 border border-warning rounded")
+                
+                # 转换为DataFrame
+                df_more = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                
+                # 转换时间戳为日期时间
+                df_more['timestamp'] = pd.to_datetime(df_more['timestamp'], unit='ms')
+                
+                # 添加计算技术指标
+                df_more = add_technical_indicators(df_more)
+                
+                logger.info(f"[辅助] 已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
+            
+            except Exception as e:
+                logger.error(f"[辅助] 直接从交易所获取数据失败: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                # 尝试使用常规方法获取
+                print("[辅助] 尝试使用常规方法获取数据...")
+                # 这里修复一个问题：使用新初始化的exchange_instance而不是全局exchange
+                df_more = fetch_ohlcv_data(exchange_instance, symbol, timeframe, since, until)
+            
+            if df_more.empty:
+                return dash.no_update, html.Div("[辅助] 没有更多K线数据可用", className="text-warning p-2 border border-warning rounded")
+            
+            # 准备新的K线数据
+            more_chart_data = prepare_data_for_chart(df_more)
+            
+            # 检查获取的数据是否与现有数据连续
+            logger.info(f"[辅助] 现有数据最后一个K线时间戳: {last_timestamp}")
+            logger.info(f"[辅助] 新数据第一个K线时间戳: {df_more['timestamp'].iloc[0].timestamp() * 1000}")
+            
+            # 合并数据 - 删除第一个元素以避免与最后一个K线重复
+            new_items_added = 0
+            for key in more_chart_data:
+                if key in chart_data and isinstance(chart_data[key], list) and isinstance(more_chart_data[key], list):
+                    # 记录合并前的数量
+                    original_count = len(chart_data[key])
+                    
+                    # 跳过第一个元素以避免重复
+                    chart_data[key].extend(more_chart_data[key][1:])
+                    
+                    # 记录新增的数量
+                    new_items_added = len(chart_data[key]) - original_count
+                    logger.info(f"[辅助] 合并数据: {key} - 原始: {original_count}, 新增: {new_items_added}, 总计: {len(chart_data[key])}")
+            
+            # 返回合并后的数据和状态信息
+            if new_items_added > 0:
+                status_info = html.Div(
+                    f"[辅助] 已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
+                    className="text-success p-2 border border-success rounded"
+                )
+                return json.dumps(chart_data), status_info
+            else:
+                return dash.no_update, html.Div("[辅助] 未找到新的K线数据", className="text-warning p-2 border border-warning rounded")
+            
+        except Exception as e:
+            print(f"[辅助] 加载更多K线数据出错: {str(e)}")
+            logger.error(f"[辅助] 加载更多K线数据出错: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return dash.no_update, html.Div(f"[辅助] 加载更多数据出错: {str(e)}", className="text-danger p-2 border border-danger rounded")
+    
     return app
 
 if __name__ == "__main__":

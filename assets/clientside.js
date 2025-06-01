@@ -425,30 +425,36 @@ const createLoadMoreButton = (container, chart) => {
     // 设置按钮样式
     Object.assign(loadMoreBtn.style, {
         position: 'absolute',
-        right: '50px',
+        right: '20px',
         top: '50%',
         transform: 'translateY(-50%)',
-        padding: '8px 12px',
-        backgroundColor: 'rgba(33, 150, 243, 0.8)',
+        padding: '10px 15px',
+        backgroundColor: 'rgba(33, 150, 243, 0.9)',
         color: 'white',
-        borderRadius: '4px',
+        borderRadius: '6px',
         cursor: 'pointer',
-        zIndex: 10,
-        transition: 'all 0.2s ease',
+        zIndex: 100,
+        transition: 'all 0.3s ease',
         opacity: '0',
         pointerEvents: 'none',
         fontFamily: 'sans-serif',
-        fontSize: '12px',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+        fontSize: '14px',
+        fontWeight: 'bold',
+        boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+        border: '1px solid rgba(255,255,255,0.2)'
     });
 
     // 添加悬停效果
     loadMoreBtn.addEventListener('mouseover', () => {
         loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 1)';
+        loadMoreBtn.style.boxShadow = '0 6px 12px rgba(0,0,0,0.4)';
+        loadMoreBtn.style.transform = 'translateY(-52%)';
     });
     
     loadMoreBtn.addEventListener('mouseout', () => {
-        loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.8)';
+        loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+        loadMoreBtn.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+        loadMoreBtn.style.transform = 'translateY(-50%)';
     });
     
     // 添加加载更多功能
@@ -457,31 +463,62 @@ const createLoadMoreButton = (container, chart) => {
         loadMoreBtn.style.backgroundColor = 'rgba(150, 150, 150, 0.8)';
         loadMoreBtn.style.cursor = 'wait';
         
-        // 触发自定义事件，通知Dash需要加载更多数据
-        const loadMoreEvent = new CustomEvent('loadMoreKlines', {
-            detail: {
-                // 获取当前最右边的时间戳作为下一批数据的起始点
-                lastTimestamp: chart.timeScale().getVisibleRange().to
+        console.log('加载更多按钮被点击');
+        
+        try {
+            // 创建或获取隐藏的加载更多触发器
+            let loadMoreTrigger = document.getElementById('load-more-trigger');
+            if (!loadMoreTrigger) {
+                loadMoreTrigger = document.createElement('input');
+                loadMoreTrigger.id = 'load-more-trigger';
+                loadMoreTrigger.type = 'hidden';
+                loadMoreTrigger.value = '0';
+                document.body.appendChild(loadMoreTrigger);
+                console.log('创建了新的load-more-trigger元素');
             }
-        });
-        document.dispatchEvent(loadMoreEvent);
-        
-        // 创建一个隐藏的输入元素来传递数据给Dash
-        let loadMoreTrigger = document.getElementById('load-more-trigger');
-        if (!loadMoreTrigger) {
-            loadMoreTrigger = document.createElement('input');
-            loadMoreTrigger.id = 'load-more-trigger';
-            loadMoreTrigger.type = 'hidden';
-            loadMoreTrigger.value = '0';
-            document.body.appendChild(loadMoreTrigger);
+            
+            // 更新触发器值
+            const newValue = parseInt(loadMoreTrigger.value || '0') + 1;
+            loadMoreTrigger.value = newValue;
+            console.log(`更新load-more-trigger值为: ${newValue}`);
+            
+            // 触发change事件
+            const event = new Event('change', { bubbles: true, cancelable: true });
+            loadMoreTrigger.dispatchEvent(event);
+            
+            // 添加超时处理，如果20秒内没有响应则恢复按钮状态
+            setTimeout(() => {
+                if (loadMoreBtn.innerText === '加载中...') {
+                    loadMoreBtn.innerText = '加载更多';
+                    loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                    loadMoreBtn.style.cursor = 'pointer';
+                    console.log('加载超时，已恢复按钮状态');
+                }
+            }, 20000);
+            
+            // 备用方案：使用辅助按钮触发
+            setTimeout(() => {
+                let helperButton = document.getElementById('load-more-helper-button');
+                if (!helperButton) {
+                    helperButton = document.createElement('button');
+                    helperButton.id = 'load-more-helper-button';
+                    helperButton.style.display = 'none';
+                    document.body.appendChild(helperButton);
+                    console.log('创建了新的load-more-helper-button元素');
+                }
+                
+                // 触发点击事件
+                helperButton.click();
+                console.log('触发了辅助按钮点击事件');
+            }, 500);
+        } catch (e) {
+            console.error('触发加载更多事件失败:', e);
+            
+            // 恢复按钮状态
+            loadMoreBtn.innerText = '加载更多';
+            loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+            loadMoreBtn.style.cursor = 'pointer';
         }
-        
-        // 更新值以触发Dash回调
-        loadMoreTrigger.value = parseInt(loadMoreTrigger.value || '0') + 1;
-        
-        // 触发change事件
-        const event = new Event('change');
-        loadMoreTrigger.dispatchEvent(event);
     });
     
     // 添加到容器
@@ -496,17 +533,52 @@ const setupLoadMoreDetection = (chart, container) => {
     // 检测图表滚动位置
     const checkRightEdge = () => {
         try {
+            if (!chart || !chartData || !chartData.candlestick) {
+                // console.log("图表或数据尚未准备好，不显示加载更多按钮");
+                return;
+            }
+            
             const timeScale = chart.timeScale();
             const logicalRange = timeScale.getVisibleLogicalRange();
             const barCount = chartData.candlestick.length;
             
-            // 如果可见范围接近右边缘（最后30个K线）
-            if (logicalRange && barCount > 0 && (barCount - logicalRange.to) < 30) {
+            if (!logicalRange) {
+                // console.log("无法获取可见范围，不显示加载更多按钮");
+                return;
+            }
+            
+            // 记录日志 - 删除此日志以避免频繁打印
+            // console.log(`当前K线总数: ${barCount}, 可见范围: ${logicalRange.from.toFixed(2)} - ${logicalRange.to.toFixed(2)}`);
+            
+            // 如果可见范围接近右边缘（最后30个K线），显示按钮
+            // 增加显示按钮的触发条件，使其更容易被激活
+            const isNearRightEdge = (barCount - logicalRange.to) < 30;
+            const isNearEnd = (logicalRange.to / barCount) > 0.8; // 当查看的是后20%的数据时
+            
+            if (isNearRightEdge || isNearEnd) {
+                // console.log("图表接近右侧边缘，显示加载更多按钮");
                 loadMoreBtn.style.opacity = '1';
                 loadMoreBtn.style.pointerEvents = 'auto';
+                
+                // 添加脉动动画效果
+                loadMoreBtn.style.animation = 'pulseButton 2s infinite';
+                // 添加CSS动画
+                if (!document.getElementById('pulse-animation')) {
+                    const style = document.createElement('style');
+                    style.id = 'pulse-animation';
+                    style.textContent = `
+                        @keyframes pulseButton {
+                            0% { transform: translateY(-50%) scale(1); }
+                            50% { transform: translateY(-50%) scale(1.05); }
+                            100% { transform: translateY(-50%) scale(1); }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
             } else {
                 loadMoreBtn.style.opacity = '0';
                 loadMoreBtn.style.pointerEvents = 'none';
+                loadMoreBtn.style.animation = 'none';
             }
         } catch (e) {
             console.error('检查右边缘时出错:', e);
@@ -517,11 +589,12 @@ const setupLoadMoreDetection = (chart, container) => {
     chart.timeScale().subscribeVisibleLogicalRangeChange(checkRightEdge);
     
     // 定期检查位置（以防止某些情况下事件未触发）
-    setInterval(checkRightEdge, 1000);
+    const intervalId = setInterval(checkRightEdge, 1000);
     
     // 返回卸载函数
     return {
         unsubscribe: () => {
+            clearInterval(intervalId);
             const handler = chart.timeScale().subscribeVisibleLogicalRangeChange(checkRightEdge);
             if (handler && typeof handler.unsubscribe === 'function') {
                 handler.unsubscribe();
@@ -3369,5 +3442,28 @@ window.dash_clientside.clientside = {
             console.error('编号跳转出错:', error);
             return 0;
         }
+    },
+    
+    /**
+     * 监听图表数据变化，恢复加载更多按钮状态
+     * @param {Object} chartData - 图表数据
+     * @returns {null} - 无返回值
+     */
+    resetLoadMoreButton: function(chartData) {
+        // 图表数据更新后，重置加载更多按钮
+        if (chartData) {
+            try {
+                const loadMoreBtn = document.querySelector('.load-more-button');
+                if (loadMoreBtn && loadMoreBtn.innerText === '加载中...') {
+                    loadMoreBtn.innerText = '加载更多';
+                    loadMoreBtn.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                    loadMoreBtn.style.cursor = 'pointer';
+                    console.log('数据已更新，重置加载更多按钮状态');
+                }
+            } catch (e) {
+                console.error('重置加载更多按钮状态时出错:', e);
+            }
+        }
+        return null;
     }
 }; 
