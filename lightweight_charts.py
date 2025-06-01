@@ -2606,8 +2606,8 @@ def create_app():
             }
             
             time_increment = time_increment_map.get(timeframe, 60 * 60 * 1000)  # 默认1小时
-            # 加载300根K线而不是1000根，减少数据量
-            candles_to_load = 300
+            # 加载1000根K线以获取更多数据
+            candles_to_load = 1000
             until = since + (time_increment * candles_to_load)
             
             # 如果until超过了当前时间，使用当前时间
@@ -2734,25 +2734,24 @@ def create_app():
         [Output("chart-data-store", "data", allow_duplicate=True), 
          Output("status-info", "children", allow_duplicate=True)],
         [Input("load-more-helper-button", "n_clicks")],
-        [State("load-more-trigger", "value"),
-         State("chart-data-store", "data"), 
+        [State("chart-data-store", "data"), 
          State("symbol-input", "value"), 
          State("timeframe-dropdown", "value"),
          State("end-date-picker", "date")],
         prevent_initial_call=True
     )
-    def load_more_klines_helper(n_clicks, trigger_value, current_chart_data, symbol, timeframe, end_date):
+    def load_more_klines_helper(n_clicks, current_chart_data, symbol, timeframe, end_date):
         """辅助函数，确保加载更多功能可以正常工作"""
         # 强制打印调试信息
         print("========== 辅助加载更多K线被触发 ==========")
-        print(f"按钮点击: {n_clicks}, 触发值: {trigger_value}")
+        print(f"按钮点击: {n_clicks}")
         print(f"交易对: {symbol}, 周期: {timeframe}")
         
-        if not n_clicks or not trigger_value or trigger_value == 0 or not current_chart_data:
+        if not n_clicks or not current_chart_data:
             print("按钮点击无效或没有现有数据，取消操作")
             return dash.no_update, dash.no_update
         
-        logger.info(f"辅助按钮被点击，触发值: {trigger_value}, n_clicks: {n_clicks}")
+        logger.info(f"辅助按钮被点击，n_clicks: {n_clicks}")
         
         try:
             # 解析当前图表数据
@@ -2776,8 +2775,10 @@ def create_app():
             # 确保开始时间大于最后一个K线的时间，避免数据重叠
             since = last_timestamp + 1
             
-            # 计算结束时间，默认向后加载一定数量的K线
-            # 根据时间周期计算时间增量
+            # 这里我们把获取数据量提高到1000根
+            candles_to_load = 1000
+            
+            # 计算结束时间
             time_increment_map = {
                 '1m': 1 * 60 * 1000,   # 1分钟，以毫秒计
                 '5m': 5 * 60 * 1000,   # 5分钟
@@ -2788,8 +2789,6 @@ def create_app():
             }
             
             time_increment = time_increment_map.get(timeframe, 60 * 60 * 1000)  # 默认1小时
-            # 加载300根K线而不是1000根，减少数据量
-            candles_to_load = 300
             until = since + (time_increment * candles_to_load)
             
             # 如果until超过了当前时间，使用当前时间
@@ -2818,19 +2817,23 @@ def create_app():
                     'endTime': until
                 }
                 
+                print(f"[辅助] 直接从交易所获取数据，参数: {params}")
                 logger.info(f"[辅助] 直接从交易所获取数据，参数: {params}")
                 
-                # 获取数据
+                # 获取数据 - 使用更明确的参数
+                print(f"[辅助] 正在调用交易所API: fetch_ohlcv({symbol}, {timeframe}, limit=1000, params={params})")
                 all_ohlcv = exchange_instance.fetch_ohlcv(
                     symbol=symbol,
                     timeframe=timeframe,
-                    limit=1000,  # 最大限制
+                    limit=1000,  # 使用最大限制
                     params=params
                 )
                 
+                print(f"[辅助] 成功从交易所获取了 {len(all_ohlcv)} 条新K线数据")
                 logger.info(f"[辅助] 成功从交易所获取了 {len(all_ohlcv)} 条新K线数据")
                 
                 if not all_ohlcv or len(all_ohlcv) == 0:
+                    print("[辅助] 没有找到更多K线数据")
                     return dash.no_update, html.Div("[辅助] 没有找到更多K线数据", className="text-warning p-2 border border-warning rounded")
                 
                 # 转换为DataFrame
@@ -2842,25 +2845,32 @@ def create_app():
                 # 添加计算技术指标
                 df_more = add_technical_indicators(df_more)
                 
+                print(f"[辅助] 已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
                 logger.info(f"[辅助] 已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
             
             except Exception as e:
+                print(f"[辅助] 直接从交易所获取数据失败: {str(e)}")
                 logger.error(f"[辅助] 直接从交易所获取数据失败: {str(e)}")
                 import traceback
-                logger.error(traceback.format_exc())
+                error_trace = traceback.format_exc()
+                print(error_trace)
+                logger.error(error_trace)
                 
                 # 尝试使用常规方法获取
                 print("[辅助] 尝试使用常规方法获取数据...")
-                # 这里修复一个问题：使用新初始化的exchange_instance而不是全局exchange
+                # 使用新初始化的exchange_instance而不是全局exchange
                 df_more = fetch_ohlcv_data(exchange_instance, symbol, timeframe, since, until)
             
             if df_more.empty:
+                print("[辅助] 没有获取到更多K线数据")
                 return dash.no_update, html.Div("[辅助] 没有更多K线数据可用", className="text-warning p-2 border border-warning rounded")
             
             # 准备新的K线数据
             more_chart_data = prepare_data_for_chart(df_more)
             
             # 检查获取的数据是否与现有数据连续
+            print(f"[辅助] 现有数据最后一个K线时间戳: {last_timestamp}")
+            print(f"[辅助] 新数据第一个K线时间戳: {df_more['timestamp'].iloc[0].timestamp() * 1000}")
             logger.info(f"[辅助] 现有数据最后一个K线时间戳: {last_timestamp}")
             logger.info(f"[辅助] 新数据第一个K线时间戳: {df_more['timestamp'].iloc[0].timestamp() * 1000}")
             
@@ -2876,23 +2886,36 @@ def create_app():
                     
                     # 记录新增的数量
                     new_items_added = len(chart_data[key]) - original_count
+                    print(f"[辅助] 合并数据: {key} - 原始: {original_count}, 新增: {new_items_added}, 总计: {len(chart_data[key])}")
                     logger.info(f"[辅助] 合并数据: {key} - 原始: {original_count}, 新增: {new_items_added}, 总计: {len(chart_data[key])}")
             
             # 返回合并后的数据和状态信息
             if new_items_added > 0:
                 status_info = html.Div(
-                    f"[辅助] 已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
+                    f"已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
                     className="text-success p-2 border border-success rounded"
                 )
+                print(f"[辅助] 成功加载了 {new_items_added} 根新K线数据")
+                
+                # 更新加载更多触发器的值
+                try:
+                    trigger = html.Div(id="load-more-trigger", children=f"{n_clicks}")
+                    print(f"[辅助] 更新了load-more-trigger值为: {n_clicks}")
+                except Exception as e:
+                    print(f"[辅助] 更新load-more-trigger值失败: {str(e)}")
+                    
                 return json.dumps(chart_data), status_info
             else:
+                print("[辅助] 未找到新的K线数据")
                 return dash.no_update, html.Div("[辅助] 未找到新的K线数据", className="text-warning p-2 border border-warning rounded")
             
         except Exception as e:
             print(f"[辅助] 加载更多K线数据出错: {str(e)}")
             logger.error(f"[辅助] 加载更多K线数据出错: {str(e)}")
             import traceback
-            logger.error(traceback.format_exc())
+            error_trace = traceback.format_exc()
+            print(error_trace)
+            logger.error(error_trace)
             return dash.no_update, html.Div(f"[辅助] 加载更多数据出错: {str(e)}", className="text-danger p-2 border border-danger rounded")
     
     return app

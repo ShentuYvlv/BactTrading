@@ -466,7 +466,17 @@ const createLoadMoreButton = (container, chart) => {
         console.log('加载更多按钮被点击');
         
         try {
-            // 创建或获取隐藏的加载更多触发器
+            // 优先使用辅助按钮触发，这是更可靠的方法
+            let helperButton = document.getElementById('load-more-helper-button');
+            if (!helperButton) {
+                helperButton = document.createElement('button');
+                helperButton.id = 'load-more-helper-button';
+                helperButton.style.display = 'none';
+                document.body.appendChild(helperButton);
+                console.log('创建了新的load-more-helper-button元素');
+            }
+            
+            // 创建或获取隐藏的加载更多触发器 - 作为备用方案
             let loadMoreTrigger = document.getElementById('load-more-trigger');
             if (!loadMoreTrigger) {
                 loadMoreTrigger = document.createElement('input');
@@ -485,6 +495,11 @@ const createLoadMoreButton = (container, chart) => {
             // 触发change事件
             const event = new Event('change', { bubbles: true, cancelable: true });
             loadMoreTrigger.dispatchEvent(event);
+            console.log('触发了load-more-trigger的change事件');
+            
+            // 触发辅助按钮点击事件 - 这是主要方法
+            helperButton.click();
+            console.log('触发了辅助按钮点击事件');
             
             // 添加超时处理，如果20秒内没有响应则恢复按钮状态
             setTimeout(() => {
@@ -495,22 +510,6 @@ const createLoadMoreButton = (container, chart) => {
                     console.log('加载超时，已恢复按钮状态');
                 }
             }, 20000);
-            
-            // 备用方案：使用辅助按钮触发
-            setTimeout(() => {
-                let helperButton = document.getElementById('load-more-helper-button');
-                if (!helperButton) {
-                    helperButton = document.createElement('button');
-                    helperButton.id = 'load-more-helper-button';
-                    helperButton.style.display = 'none';
-                    document.body.appendChild(helperButton);
-                    console.log('创建了新的load-more-helper-button元素');
-                }
-                
-                // 触发点击事件
-                helperButton.click();
-                console.log('触发了辅助按钮点击事件');
-            }, 500);
         } catch (e) {
             console.error('触发加载更多事件失败:', e);
             
