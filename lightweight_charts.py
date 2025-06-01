@@ -190,17 +190,30 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 cache_lock = threading.Lock()
 
 def get_cache_key(symbol, timeframe, since, until):
-    """生成缓存键"""
-    # 将参数转换为字符串并连接
-    key_str = f"{symbol}_{timeframe}_{since}_{until}"
-    # 使用哈希函数生成唯一键
-    return hashlib.md5(key_str.encode()).hexdigest()
+    """生成缓存键，包含币种和时间范围信息"""
+    # 处理symbol，移除特殊字符
+    clean_symbol = symbol.replace('/', '_').replace(':', '_')
+    
+    # 将时间戳转换为更易读的格式
+    since_date = datetime.fromtimestamp(since / 1000).strftime('%Y%m%d') if since else 'none'
+    until_date = datetime.fromtimestamp(until / 1000).strftime('%Y%m%d') if until else 'none'
+    
+    # 主键部分：包含币种和时间周期
+    main_key = f"{clean_symbol}_{timeframe}"
+    
+    # 完整键：用于缓存文件名
+    full_key_str = f"{main_key}_{since_date}_{until_date}"
+    
+    # 为防止文件名过长，对完整键生成哈希值，但保留主键作为前缀
+    hash_part = hashlib.md5(f"{since}_{until}".encode()).hexdigest()[:8]
+    
+    return f"{main_key}_{hash_part}"
 
 def get_cached_data(cache_key):
-    """从缓存获取数据"""
+    """从缓存获取数据，支持模糊匹配"""
     cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
     
-    # 检查缓存文件是否存在且未过期
+    # 检查精确匹配的缓存文件是否存在且未过期
     if os.path.exists(cache_file):
         # 检查文件修改时间，如果在24小时内则使用缓存
         file_mod_time = os.path.getmtime(cache_file)
@@ -212,6 +225,35 @@ def get_cached_data(cache_key):
                 return data
             except Exception as e:
                 logger.error(f"读取缓存失败: {str(e)}")
+    
+    # 如果没有精确匹配，尝试查找同一币种和时间周期的缓存文件
+    if "_" in cache_key:
+        # 提取主键部分（币种和时间周期）
+        main_key = cache_key.rsplit('_', 1)[0]
+        
+        # 查找所有匹配的缓存文件
+        matching_files = []
+        for filename in os.listdir(CACHE_DIR):
+            if filename.startswith(f"{main_key}_") and filename.endswith(".pkl"):
+                full_path = os.path.join(CACHE_DIR, filename)
+                # 检查文件是否过期
+                file_mod_time = os.path.getmtime(full_path)
+                if time.time() - file_mod_time < 24 * 3600:  # 24小时缓存
+                    matching_files.append((full_path, file_mod_time))
+        
+        # 如果找到匹配的文件，使用最新的那个
+        if matching_files:
+            # 按修改时间排序，最新的在前
+            matching_files.sort(key=lambda x: x[1], reverse=True)
+            newest_file = matching_files[0][0]
+            try:
+                with open(newest_file, 'rb') as f:
+                    data = pickle.load(f)
+                cache_key_used = os.path.basename(newest_file).replace('.pkl', '')
+                logger.info(f"使用模糊匹配的缓存: {cache_key_used} (请求的键: {cache_key})")
+                return data
+            except Exception as e:
+                logger.error(f"读取模糊匹配缓存失败: {str(e)}")
     
     return None
 
@@ -225,6 +267,69 @@ def save_to_cache(cache_key, data):
             logger.info(f"数据已保存到缓存: {cache_key}")
     except Exception as e:
         logger.error(f"保存缓存失败: {str(e)}")
+
+def append_to_cache(symbol, timeframe, new_data):
+    """将新数据追加到现有缓存文件中"""
+    try:
+        # 查找该币种和时间周期的所有缓存文件
+        main_key = f"{symbol.replace('/', '_').replace(':', '_')}_{timeframe}"
+        matching_files = []
+        
+        for filename in os.listdir(CACHE_DIR):
+            if filename.startswith(f"{main_key}_") and filename.endswith(".pkl"):
+                full_path = os.path.join(CACHE_DIR, filename)
+                file_mod_time = os.path.getmtime(full_path)
+                matching_files.append((full_path, file_mod_time))
+        
+        # 如果找到匹配的文件，使用最新的那个
+        if matching_files:
+            # 按修改时间排序，最新的在前
+            matching_files.sort(key=lambda x: x[1], reverse=True)
+            newest_file = matching_files[0][0]
+            cache_key = os.path.basename(newest_file).replace('.pkl', '')
+            
+            # 读取现有数据
+            with open(newest_file, 'rb') as f:
+                existing_data = pickle.load(f)
+            
+            # 防止数据重复，检查时间戳
+            if not existing_data.empty and not new_data.empty:
+                # 确定现有数据的最后时间戳
+                last_timestamp = existing_data['timestamp'].max()
+                
+                # 过滤掉新数据中早于或等于最后时间戳的记录
+                new_data = new_data[new_data['timestamp'] > last_timestamp]
+                
+                if new_data.empty:
+                    logger.info(f"没有新数据需要追加到缓存")
+                    return None
+            
+            # 合并数据
+            combined_data = pd.concat([existing_data, new_data], ignore_index=True)
+            
+            # 确保时间排序
+            combined_data = combined_data.sort_values('timestamp').reset_index(drop=True)
+            
+            # 重新保存到同一文件
+            with cache_lock:
+                with open(newest_file, 'wb') as f:
+                    pickle.dump(combined_data, f)
+            
+            logger.info(f"新数据已追加到缓存文件: {cache_key}, 总计 {len(combined_data)} 条记录")
+            return cache_key
+        else:
+            # 如果没有找到匹配的文件，创建新的缓存文件
+            cache_key = get_cache_key(symbol, timeframe, 
+                                      int(new_data['timestamp'].min().timestamp() * 1000),
+                                      int(new_data['timestamp'].max().timestamp() * 1000))
+            save_to_cache(cache_key, new_data)
+            logger.info(f"未找到现有缓存，已创建新缓存: {cache_key}")
+            return cache_key
+    except Exception as e:
+        logger.error(f"追加到缓存失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
 
 def initialize_exchange():
     """初始化并返回配置好的交易所对象"""
@@ -973,14 +1078,96 @@ def merge_trades_to_positions(trades_df):
         logger.info("没有找到有效的仓位")
         return pd.DataFrame()
 
+def list_cache_files():
+    """列出所有可用的缓存文件，按币种分组"""
+    if not os.path.exists(CACHE_DIR):
+        logger.warning(f"缓存目录不存在: {CACHE_DIR}")
+        return {}
+    
+    # 按币种分组的缓存文件字典
+    cache_files_by_symbol = {}
+    
+    for filename in os.listdir(CACHE_DIR):
+        if filename.endswith(".pkl"):
+            try:
+                # 尝试从文件名解析币种信息
+                parts = filename.replace(".pkl", "").split("_")
+                if len(parts) >= 3:  # 至少应该有币种、交易对后缀和时间周期
+                    # 推断币种
+                    if len(parts) >= 4 and parts[1] == "USDT":  # 形如 BTC_USDT_1h_xxx
+                        symbol = f"{parts[0]}/USDT"
+                        timeframe = parts[2]
+                    else:  # 形如 BTC_USDT_USDT_1h_xxx
+                        symbol = f"{parts[0]}_{parts[1]}"
+                        timeframe = parts[2]
+                    
+                    # 获取文件大小和修改时间
+                    file_path = os.path.join(CACHE_DIR, filename)
+                    file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
+                    file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                    
+                    # 添加到字典
+                    key = symbol.replace("_", "/")
+                    if key not in cache_files_by_symbol:
+                        cache_files_by_symbol[key] = []
+                    
+                    cache_files_by_symbol[key].append({
+                        "filename": filename,
+                        "timeframe": timeframe,
+                        "size": f"{file_size:.2f} MB",
+                        "modified": file_time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+            except Exception as e:
+                logger.debug(f"解析缓存文件名出错 {filename}: {str(e)}")
+                continue
+    
+    # 按币种排序
+    return dict(sorted(cache_files_by_symbol.items()))
+
+def print_cache_info():
+    """打印缓存信息摘要"""
+    try:
+        cache_files = list_cache_files()
+        
+        if not cache_files:
+            logger.info("当前没有缓存文件")
+            return
+        
+        total_size = 0
+        total_files = 0
+        for symbol, files in cache_files.items():
+            for file_info in files:
+                total_files += 1
+                total_size += float(file_info["size"].split()[0])
+        
+        logger.info(f"缓存统计: {total_files} 个文件, {total_size:.2f} MB, {len(cache_files)} 个币种")
+        
+        # 打印前5个币种的详细信息
+        top_symbols = list(cache_files.keys())[:5]
+        for symbol in top_symbols:
+            files = cache_files[symbol]
+            logger.info(f"  {symbol}: {len(files)} 个缓存文件")
+            for file_info in files[:2]:  # 只显示每个币种的前2个文件
+                logger.info(f"    - {file_info['filename']} ({file_info['timeframe']}, {file_info['size']})")
+            if len(files) > 2:
+                logger.info(f"    - ... 等 {len(files)-2} 个文件")
+    except Exception as e:
+        logger.error(f"打印缓存信息时出错: {str(e)}")
+
 def create_app():
     """创建Dash应用"""
     # 初始化交易所
     exchange = initialize_exchange()
     
+    # 打印缓存信息
+    print_cache_info()
+    
     # 加载币种数据
     csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
     symbols_data = load_symbols_from_csv(csv_file_path)
+    
+    # 创建币种加载状态字典，保存每个币种的最后加载时间和参数
+    symbol_load_states = {}
     
     # 创建应用
     app = dash.Dash(
@@ -2304,12 +2491,19 @@ def create_app():
         logger.info(f"币种 {clicked_symbol} 被点击，开始加载数据...")
         
         try:
-            # 设置默认的日期范围（2024.7-2025.5）
-            default_start_date = datetime(2024, 11, 20)
-            default_end_date = datetime(2025, 5, 30)
-            
-            # 设置默认的K线周期
-            default_timeframe = '15m'
+            # 检查是否有保存的币种状态
+            if clicked_symbol in symbol_load_states:
+                # 使用保存的状态，而不是默认值
+                saved_state = symbol_load_states[clicked_symbol]
+                default_start_date = pd.to_datetime(saved_state.get('start_date', '2024-11-20'))
+                default_end_date = pd.to_datetime(saved_state.get('end_date', '2025-5-30'))
+                default_timeframe = saved_state.get('timeframe', '15m')
+                print(f"使用保存的币种状态: {saved_state}")
+            else:
+                # 使用默认值
+                default_start_date = datetime(2024, 11, 20)
+                default_end_date = datetime(2025, 5, 30)
+                default_timeframe = '15m'
             
             # 转换为时间戳（毫秒）
             since = int(default_start_date.timestamp() * 1000)
@@ -2323,7 +2517,7 @@ def create_app():
             # 显示加载中状态
             loading_status = html.Div("正在加载数据，请稍候...", className="text-warning p-2 border border-warning rounded")
             
-            # 获取K线数据 - 使用5分钟周期
+            # 获取K线数据
             df = fetch_ohlcv_data(exchange, clicked_symbol, default_timeframe, since, until)
             
             if df.empty:
@@ -2366,6 +2560,14 @@ def create_app():
                     ], width=12)
                 ])
             ], className="p-2 border border-secondary rounded bg-dark")
+            
+            # 保存当前币种的加载状态
+            symbol_load_states[clicked_symbol] = {
+                'start_date': default_start_date.strftime('%Y-%m-%d'),
+                'end_date': default_end_date.strftime('%Y-%m-%d'),
+                'timeframe': default_timeframe,
+                'last_load_time': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
             
             return (
                 json.dumps(chart_data), 
@@ -2617,7 +2819,7 @@ def create_app():
             print(f"请求时间范围: {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             logger.info(f"加载更多K线: 从 {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             
-            # 获取更多K线数据 - 禁用缓存以确保获取新数据
+            # 获取更多K线数据 - 直接从网络获取，不使用缓存
             try:
                 # 确保交易对格式正确
                 if ':' not in symbol and symbol.endswith('USDT'):
@@ -2630,7 +2832,7 @@ def create_app():
                 print("正在初始化交易所...")
                 exchange_instance = initialize_exchange()
                 
-                # 直接从交易所获取数据，不使用缓存
+                # 直接从交易所获取数据，跳过缓存检查
                 params = {
                     'startTime': since,
                     'endTime': until
@@ -2666,6 +2868,9 @@ def create_app():
                 
                 print(f"已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
                 logger.info(f"已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
+                
+                # 将新数据追加到现有缓存文件中，而不是创建新的缓存文件
+                append_to_cache(symbol, timeframe, df_more)
             
             except Exception as e:
                 print(f"直接从交易所获取数据失败: {str(e)}")
@@ -2679,6 +2884,10 @@ def create_app():
                 print("尝试使用常规方法获取数据...")
                 # 这里修复一个问题：使用新初始化的exchange_instance而不是全局exchange
                 df_more = fetch_ohlcv_data(exchange_instance, symbol, timeframe, since, until)
+                
+                # 如果获取成功，同样追加到现有缓存
+                if not df_more.empty:
+                    append_to_cache(symbol, timeframe, df_more)
             
             if df_more.empty:
                 print("没有获取到更多K线数据")
@@ -2798,7 +3007,7 @@ def create_app():
             print(f"[辅助] 请求时间范围: {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             logger.info(f"[辅助] 加载更多K线: 从 {pd.to_datetime(since, unit='ms')} 到 {pd.to_datetime(until, unit='ms')}")
             
-            # 获取更多K线数据 - 禁用缓存以确保获取新数据
+            # 获取更多K线数据 - 直接从网络获取，不使用缓存
             try:
                 # 确保交易对格式正确
                 if ':' not in symbol and symbol.endswith('USDT'):
@@ -2811,7 +3020,7 @@ def create_app():
                 print("[辅助] 正在初始化交易所...")
                 exchange_instance = initialize_exchange()
                 
-                # 直接从交易所获取数据，不使用缓存
+                # 直接从交易所获取数据，跳过缓存检查
                 params = {
                     'startTime': since,
                     'endTime': until
@@ -2847,6 +3056,9 @@ def create_app():
                 
                 print(f"[辅助] 已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
                 logger.info(f"[辅助] 已处理 {len(df_more)} 条新K线数据，时间范围: {df_more['timestamp'].min()} - {df_more['timestamp'].max()}")
+                
+                # 将新数据追加到现有缓存文件中，而不是创建新的缓存文件
+                append_to_cache(symbol, timeframe, df_more)
             
             except Exception as e:
                 print(f"[辅助] 直接从交易所获取数据失败: {str(e)}")
