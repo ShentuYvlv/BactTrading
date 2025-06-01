@@ -1881,6 +1881,9 @@ window.dash_clientside.clientside = {
                 const markers = [];
                 const positionDetailsMap = {};
                 
+                // 重置全局仓位计数器，确保每次更新标记时都从1开始
+                window.positionCounters = {};
+                
                 // 处理每个仓位
                 tradesData.forEach(position => {
                     if (!position.open_time || !position.open_price) {
@@ -1907,11 +1910,7 @@ window.dash_clientside.clientside = {
                         symbolName = "币种";
                     }
                     
-                    // 计算仓位序号 - 使用全局计数器
-                    if (!window.positionCounters) {
-                        window.positionCounters = {};
-                    }
-                    
+                    // 计算仓位序号 - 每次初始化时重置计数器
                     if (!window.positionCounters[symbolName]) {
                         window.positionCounters[symbolName] = 0;
                     }
@@ -1947,9 +1946,6 @@ window.dash_clientside.clientside = {
                         };
                         
                         markers.push(closeMarker);
-                    } else {
-                        // 持仓中的仓位，只显示开仓标记
-                        console.log(`仓位 ${positionId} 持仓中`);
                     }
                     
                     // 存储仓位详情
