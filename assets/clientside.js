@@ -29,12 +29,10 @@ const formatBeijingTime = (timestamp) => {
     // 创建日期对象
     const date = new Date(correctedTimestamp);
     
-    // 调整时间：减去10个小时
-    const adjustedDate = new Date(date.getTime());
-    
+    // 不再需要调整时间，直接使用正确的时间戳
     // 格式化日期和时间
-    const formattedDate = `${adjustedDate.getFullYear()}-${pad(adjustedDate.getMonth() + 1)}-${pad(adjustedDate.getDate())}`;
-    const formattedTime = `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`;
+    const formattedDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const formattedTime = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
     
     return { 
         date: formattedDate, 
@@ -475,26 +473,26 @@ const createLoadMoreButton = (container, chart) => {
                 document.body.appendChild(helperButton);
                 console.log('创建了新的load-more-helper-button元素');
             }
-            
+        
             // 创建或获取隐藏的加载更多触发器 - 作为备用方案
-            let loadMoreTrigger = document.getElementById('load-more-trigger');
-            if (!loadMoreTrigger) {
-                loadMoreTrigger = document.createElement('input');
-                loadMoreTrigger.id = 'load-more-trigger';
-                loadMoreTrigger.type = 'hidden';
-                loadMoreTrigger.value = '0';
-                document.body.appendChild(loadMoreTrigger);
+        let loadMoreTrigger = document.getElementById('load-more-trigger');
+        if (!loadMoreTrigger) {
+            loadMoreTrigger = document.createElement('input');
+            loadMoreTrigger.id = 'load-more-trigger';
+            loadMoreTrigger.type = 'hidden';
+            loadMoreTrigger.value = '0';
+            document.body.appendChild(loadMoreTrigger);
                 console.log('创建了新的load-more-trigger元素');
-            }
-            
+        }
+        
             // 更新触发器值
             const newValue = parseInt(loadMoreTrigger.value || '0') + 1;
             loadMoreTrigger.value = newValue;
             console.log(`更新load-more-trigger值为: ${newValue}`);
-            
-            // 触发change事件
+        
+        // 触发change事件
             const event = new Event('change', { bubbles: true, cancelable: true });
-            loadMoreTrigger.dispatchEvent(event);
+        loadMoreTrigger.dispatchEvent(event);
             console.log('触发了load-more-trigger的change事件');
             
             // 触发辅助按钮点击事件 - 这是主要方法
@@ -532,22 +530,18 @@ const setupLoadMoreDetection = (chart, container) => {
     // 检测图表滚动位置
     const checkRightEdge = () => {
         try {
-            if (!chart || !chartData || !chartData.candlestick) {
-                // console.log("图表或数据尚未准备好，不显示加载更多按钮");
+            if (!chart || !window.chartData || !window.chartData.candlestick) {
+                // 静默失败，不显示错误
                 return;
             }
             
             const timeScale = chart.timeScale();
+            if (!timeScale) return;
+            
             const logicalRange = timeScale.getVisibleLogicalRange();
-            const barCount = chartData.candlestick.length;
+            if (!logicalRange) return;
             
-            if (!logicalRange) {
-                // console.log("无法获取可见范围，不显示加载更多按钮");
-                return;
-            }
-            
-            // 记录日志 - 删除此日志以避免频繁打印
-            // console.log(`当前K线总数: ${barCount}, 可见范围: ${logicalRange.from.toFixed(2)} - ${logicalRange.to.toFixed(2)}`);
+            const barCount = window.chartData.candlestick.length;
             
             // 如果可见范围接近右边缘（最后30个K线），显示按钮
             // 增加显示按钮的触发条件，使其更容易被激活
@@ -555,7 +549,6 @@ const setupLoadMoreDetection = (chart, container) => {
             const isNearEnd = (logicalRange.to / barCount) > 0.8; // 当查看的是后20%的数据时
             
             if (isNearRightEdge || isNearEnd) {
-                // console.log("图表接近右侧边缘，显示加载更多按钮");
                 loadMoreBtn.style.opacity = '1';
                 loadMoreBtn.style.pointerEvents = 'auto';
                 
@@ -580,7 +573,10 @@ const setupLoadMoreDetection = (chart, container) => {
                 loadMoreBtn.style.animation = 'none';
             }
         } catch (e) {
+            // 避免记录频繁错误，只在开发环境下显示
+            if (window.debugMode) {
             console.error('检查右边缘时出错:', e);
+            }
         }
     };
     
@@ -629,15 +625,27 @@ window.dash_clientside.clientside = {
                 // 动态加载库
                 const script = document.createElement('script');
                 script.src = 'https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js';
+                script.crossOrigin = "anonymous"; // 添加跨域支持
                 script.onload = () => {
                     console.log('库加载成功，重新初始化图表...');
                     setTimeout(() => this.initializeChart(chartData, tradesData, showEma, showTrades, showBollinger, showRsi, showMacd, containerId), 500);
                 };
                 script.onerror = () => {
                     console.error('库加载失败');
+                    // 尝试使用备用CDN
+                    const backupScript = document.createElement('script');
+                    backupScript.src = 'https://cdn.jsdelivr.net/npm/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js';
+                    backupScript.crossOrigin = "anonymous";
+                    backupScript.onload = () => {
+                        console.log('从备用CDN加载库成功，重新初始化图表...');
+                        setTimeout(() => this.initializeChart(chartData, tradesData, showEma, showTrades, showBollinger, showRsi, showMacd, containerId), 500);
+                    };
+                    backupScript.onerror = () => {
                     if (container) {
                         container.innerHTML = '<div class="text-center p-5 text-danger">图表库加载失败，请刷新页面重试</div>';
                     }
+                    };
+                    document.head.appendChild(backupScript);
                 };
                 document.head.appendChild(script);
             }
@@ -651,6 +659,10 @@ window.dash_clientside.clientside = {
         try {
             chartData = JSON.parse(chartData);
             tradesData = tradesData ? JSON.parse(tradesData) : [];
+            
+            // 设置为全局变量，以便其他函数可以访问
+            window.chartData = chartData;
+            window.tradesData = tradesData;
         } catch (e) {
             console.error('解析图表数据失败:', e);
             return null;
@@ -911,31 +923,27 @@ window.dash_clientside.clientside = {
                     const timestamp = correctTimestamp(time);
                     const date = new Date(timestamp);
                     
-                    // 调整时间：减去10个小时
-                    const adjustedDate = new Date(date.getTime() - 10 * 60 * 60 * 1000);
-                    
-                    // 使用调整后的时间来决定格式
+                    // 不再调整时间，直接使用原始时间戳
+                    // 使用原始时间来决定格式
                     switch (tickMarkType) {
                         case LightweightCharts.TickMarkType.Year:
-                            return adjustedDate.getFullYear().toString();
+                            return date.getFullYear().toString();
                         case LightweightCharts.TickMarkType.Month:
                             // 使用Intl API来获取本地化的月份名称缩写
-                            return new Intl.DateTimeFormat(locale, { month: 'short' }).format(adjustedDate);
+                            return new Intl.DateTimeFormat(locale, { month: 'short' }).format(date);
                         case LightweightCharts.TickMarkType.Day:
-                            return pad(adjustedDate.getDate());
+                            return pad(date.getDate());
                         case LightweightCharts.TickMarkType.Hour:
                             // 每4小时标记一个小时文本，其他小时留空或显示更简略标记
-                            if (adjustedDate.getHours() % 4 === 0) {
-                                return `${pad(adjustedDate.getHours())}:00`;
+                            if (date.getHours() % 4 === 0) {
+                                return `${pad(date.getHours())}:00`;
                             }
                             return ''; // 其他小时不显示，避免过于密集
                         case LightweightCharts.TickMarkType.Minute:
                             // 只有在非常非常放大的情况下才会显示分钟
-                    return `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`; 
-                        default:
-                            // 对于更细的粒度或未知类型，可以显示HH:MM
-                            return `${pad(adjustedDate.getHours())}:${pad(adjustedDate.getMinutes())}`;
+                            return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
                     }
+                    return '';
                 },
                 // 统一时间轴配置，确保所有图表使用相同设置
                 barSpacing: 6,           // 默认柱形间距
@@ -2806,13 +2814,36 @@ window.dash_clientside.clientside = {
             
             const script = document.createElement('script');
             script.src = src;
+            script.crossOrigin = "anonymous"; // 添加跨域支持
             script.onload = () => {
                 console.log(`Script loaded: ${src}`);
                 resolve();
             };
             script.onerror = (e) => {
-                console.error(`Script error: ${src}`, e);
+                // 提供更具体的错误信息
+                console.error(`Script load error: ${src}`, e);
+                // 使用本地备份或CDN替代方案
+                const backupSrc = src.includes('unpkg.com') 
+                    ? src.replace('unpkg.com', 'cdn.jsdelivr.net/npm')
+                    : null;
+                
+                if (backupSrc) {
+                    console.log(`尝试从备用CDN加载: ${backupSrc}`);
+                    const backupScript = document.createElement('script');
+                    backupScript.src = backupSrc;
+                    backupScript.crossOrigin = "anonymous";
+                    backupScript.onload = () => {
+                        console.log(`Backup script loaded: ${backupSrc}`);
+                        resolve();
+                    };
+                    backupScript.onerror = (err) => {
+                        console.error(`Backup script load failed: ${backupSrc}`, err);
+                        reject(new Error(`Failed to load script from both sources: ${src} and ${backupSrc}`));
+                    };
+                    document.head.appendChild(backupScript);
+                } else {
                 reject(e);
+                }
             };
             document.head.appendChild(script);
         });

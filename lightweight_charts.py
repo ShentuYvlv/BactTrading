@@ -123,7 +123,10 @@ def load_positions_from_csv(csv_file_path, symbol=None):
                     open_timestamp = int(row['原始开仓时间戳']) // 1000  # 转换为秒级时间戳
                 else:
                     # 否则尝试解析时间字符串
-                    open_timestamp = int(pd.to_datetime(row['开仓时间']).timestamp())
+                    # 添加utc=True参数，确保时间被当作北京时区处理并转换为UTC时间戳
+                    # 或者明确指定时区为上海时区后转换为UTC
+                    open_time_dt = pd.to_datetime(row['开仓时间'])
+                    open_timestamp = int((open_time_dt - pd.Timedelta(hours=8)).timestamp())
                 
                 # 处理平仓时间
                 if '状态' in row and row['状态'] != '已平仓':
@@ -135,8 +138,13 @@ def load_positions_from_csv(csv_file_path, symbol=None):
                     close_time_formatted = row['平仓时间']
                 else:
                     # 尝试解析时间字符串
-                    close_timestamp = int(pd.to_datetime(row['平仓时间']).timestamp()) if pd.notna(row['平仓时间']) else None
-                    close_time_formatted = row['平仓时间'] if pd.notna(row['平仓时间']) else '持仓中'
+                    if pd.notna(row['平仓时间']):
+                        close_time_dt = pd.to_datetime(row['平仓时间'])
+                        close_timestamp = int((close_time_dt - pd.Timedelta(hours=8)).timestamp())
+                        close_time_formatted = row['平仓时间']
+                    else:
+                        close_timestamp = None
+                        close_time_formatted = '持仓中'
                 
                 # 计算是否盈利
                 profit = float(row['PnL']) if pd.notna(row['PnL']) else 0
@@ -2242,8 +2250,8 @@ def create_app():
                 
                 # 获取交易记录
                 df_trades = fetch_trades(exchange, symbol, since, until)
-                df_trades.to_excel("trades.xlsx", index=False)
-                print("原始交易文件已保存为 df_trades.xlsx")
+                #df_trades.to_excel("trades.xlsx", index=False)
+                #print("原始交易文件已保存为 df_trades.xlsx")
                 # 合并交易记录为仓位信息
                 if not df_trades.empty:
                     positions_df = merge_trades_to_positions(df_trades)
@@ -2258,9 +2266,9 @@ def create_app():
                             # 检查仓位是否有有效的开仓和平仓时间
                             if pd.notna(pos['open_time']) and pd.notna(pos['close_time']):
                                 # 将时间转换为Unix时间戳（秒）以匹配K线数据的 time 格式
-                                # 明确指定时区为UTC+8（北京时间），然后转换为Unix时间戳
-                                open_timestamp = int(pd.to_datetime(pos['open_time']).tz_localize('Asia/Shanghai').timestamp())
-                                close_timestamp = int(pd.to_datetime(pos['close_time']).tz_localize('Asia/Shanghai').timestamp())
+                                # 直接使用时间戳，不做额外的时区处理，避免时间偏移
+                                open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
+                                close_timestamp = int(pd.to_datetime(pos['close_time']).timestamp())
                                 
                                 # 创建仓位数据对象，包含开仓和平仓的完整信息
                                 position_data = {
@@ -2280,8 +2288,8 @@ def create_app():
                                 
                                 positions_data.append(position_data)
                             elif pd.notna(pos['open_time']) and pos.get('is_open', False):
-                                # 仅有开仓信息的持仓，时间同样使用秒级并指定时区
-                                open_timestamp = int(pd.to_datetime(pos['open_time']).tz_localize('Asia/Shanghai').timestamp())
+                                # 仅有开仓信息的持仓，直接使用时间戳，不做额外的时区处理
+                                open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
                                 
                                 position_data = {
                                     'position_id': str(pos.name),
@@ -2920,7 +2928,7 @@ def create_app():
             # 返回合并后的数据和状态信息
             if new_items_added > 0:
                 status_info = html.Div(
-                    f"已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
+                        f"已加载额外的 {new_items_added} 根K线数据，总计 {len(chart_data['candlestick'])} 根",
                     className="text-success p-2 border border-success rounded"
                 )
                 print(f"成功加载了 {new_items_added} 根新K线数据")
