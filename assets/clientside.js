@@ -424,7 +424,7 @@ const createLoadMoreButton = (container, chart) => {
     Object.assign(loadMoreBtn.style, {
         position: 'absolute',
         right: '20px',
-        top: '50%',
+        top: '5%',
         transform: 'translateY(-50%)',
         padding: '10px 15px',
         backgroundColor: 'rgba(33, 150, 243, 0.9)',
@@ -461,7 +461,7 @@ const createLoadMoreButton = (container, chart) => {
         loadMoreBtn.style.backgroundColor = 'rgba(150, 150, 150, 0.8)';
         loadMoreBtn.style.cursor = 'wait';
         
-        console.log('加载更多按钮被点击');
+        console.log('加载更多按钮被点击 - 加载更多K线数据');
         
         try {
             // 优先使用辅助按钮触发，这是更可靠的方法
@@ -473,7 +473,15 @@ const createLoadMoreButton = (container, chart) => {
                 document.body.appendChild(helperButton);
                 console.log('创建了新的load-more-helper-button元素');
             }
-        
+            
+            // 使用辅助按钮触发数据加载
+            console.log('触发辅助按钮点击事件');
+            if (typeof helperButton.click === 'function') {
+                helperButton.click();
+            } else {
+                console.error('辅助按钮click方法不可用');
+            }
+
             // 创建或获取隐藏的加载更多触发器 - 作为备用方案
         let loadMoreTrigger = document.getElementById('load-more-trigger');
         if (!loadMoreTrigger) {

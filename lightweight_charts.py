@@ -2508,8 +2508,31 @@ def create_app():
                 default_timeframe = saved_state.get('timeframe', '15m')
                 print(f"使用保存的币种状态: {saved_state}")
             else:
-                # 使用默认值
-                default_start_date = datetime(2024, 11, 20)
+                # 使用默认值 - 从最近的交易开始而不是固定日期
+                csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
+                
+                # 尝试加载该币种的交易记录
+                positions = load_positions_from_csv(csv_file_path, symbol=clicked_symbol)
+                
+                # 查找最近一笔交易的时间
+                recent_trade_date = None
+                if positions and len(positions) > 0:
+                    # 查找所有交易中最早的开仓时间
+                    open_times = [pos['open_time'] for pos in positions if 'open_time' in pos and pos['open_time']]
+                    if open_times:
+                        # 将Unix时间戳转换为datetime对象
+                        earliest_trade_time = min(open_times)
+                        recent_trade_date = datetime.fromtimestamp(earliest_trade_time)
+                        # 向前推7天，以便获取交易前的K线数据
+                        recent_trade_date = recent_trade_date - timedelta(days=7)
+                        logger.info(f"找到{clicked_symbol}最早交易时间: {datetime.fromtimestamp(earliest_trade_time)}，设置开始日期为提前7天: {recent_trade_date}")
+                
+                # 如果找不到交易记录，则使用默认日期
+                if not recent_trade_date:
+                    recent_trade_date = datetime(2024, 11, 20)
+                    logger.info(f"未找到{clicked_symbol}的交易记录，使用默认开始日期: {recent_trade_date}")
+                
+                default_start_date = recent_trade_date
                 default_end_date = datetime(2025, 5, 30)
                 default_timeframe = '15m'
             
