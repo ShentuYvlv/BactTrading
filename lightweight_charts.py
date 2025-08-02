@@ -1162,18 +1162,46 @@ def print_cache_info():
     except Exception as e:
         logger.error(f"打印缓存信息时出错: {str(e)}")
 
+def get_data_files():
+    """获取data文件夹中的所有CSV文件"""
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+    if not os.path.exists(data_dir):
+        logger.warning(f"data文件夹不存在: {data_dir}")
+        return []
+
+    csv_files = []
+    for filename in os.listdir(data_dir):
+        if filename.endswith('.csv'):
+            file_path = os.path.join(data_dir, filename)
+            file_size = os.path.getsize(file_path) / (1024 * 1024)  # 转换为MB
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+
+            csv_files.append({
+                'filename': filename,
+                'path': file_path,
+                'size': f"{file_size:.2f} MB",
+                'modified': file_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+    # 按修改时间排序，最新的在前
+    csv_files.sort(key=lambda x: x['modified'], reverse=True)
+    return csv_files
+
 def create_app():
     """创建Dash应用"""
     # 初始化交易所
     exchange = initialize_exchange()
-    
+
     # 打印缓存信息
     print_cache_info()
-    
-    # 加载币种数据
-    csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
-    symbols_data = load_symbols_from_csv(csv_file_path)
-    
+
+    # 获取data文件夹中的CSV文件
+    data_files = get_data_files()
+
+    # 默认选择第一个文件（最新的）
+    default_file = data_files[0]['path'] if data_files else None
+    symbols_data = load_symbols_from_csv(default_file) if default_file else {}
+
     # 创建币种加载状态字典，保存每个币种的最后加载时间和参数
     symbol_load_states = {}
     
@@ -1906,8 +1934,24 @@ def create_app():
                     # 控制面板卡片
                     dbc.Card([
                         dbc.CardBody([
-                    # 交易对选择
+                    # 数据文件选择
                             dbc.Row([
+                    dbc.Col([
+                        html.Label("数据文件", className="form-label mb-1"),
+                        dcc.Dropdown(
+                            id="data-file-dropdown",
+                            options=[
+                                {'label': f"{file['filename']} ({file['size']}, {file['modified']})",
+                                 'value': file['path']}
+                                for file in data_files
+                            ],
+                            value=default_file,
+                            clearable=False,
+                            className="dash-dropdown-sm"
+                        )
+                                ], width=12, className="mb-2"),
+
+                    # 交易对选择
                     dbc.Col([
                         html.Label("交易对", className="form-label mb-1"),
                         dcc.Input(
@@ -2211,20 +2255,56 @@ def create_app():
         
         return start_ts, end_ts
 
+    # 文件选择回调 - 当用户选择不同的数据文件时更新币种列表
+    @app.callback(
+        Output("symbol-grid", "children"),
+        Input("data-file-dropdown", "value"),
+        prevent_initial_call=True
+    )
+    def update_symbols_from_file(selected_file_path):
+        """当选择不同的数据文件时，更新币种列表"""
+        if not selected_file_path:
+            return []
+
+        try:
+            # 从选择的文件加载币种数据
+            symbols_data = load_symbols_from_csv(selected_file_path)
+
+            # 将币种数据转换为选项列表
+            symbol_items = []
+            for symbol, count in symbols_data.items():
+                symbol_items.append(
+                    html.Div([
+                        html.Div(symbol, className="symbol-name"),
+                        html.Div(f"交易: {count}", className="symbol-count")
+                    ], id=f"symbol-{symbol.replace('/', '-').replace(':', '_')}",
+                        className="symbol-item",
+                        n_clicks=0,
+                        title=f"{symbol} - 交易次数: {count}")
+                )
+
+            logger.info(f"从文件 {selected_file_path} 加载了 {len(symbol_items)} 个币种")
+            return symbol_items
+
+        except Exception as e:
+            logger.error(f"更新币种列表时出错: {str(e)}")
+            return [html.Div("加载币种数据失败", className="text-danger")]
+
     # 加载数据回调
     @app.callback(
-        [Output("chart-data-store", "data", allow_duplicate=True), 
+        [Output("chart-data-store", "data", allow_duplicate=True),
          Output("trades-data-store", "data", allow_duplicate=True),
          Output("loading-spinner", "children", allow_duplicate=True),
          Output("status-info", "children", allow_duplicate=True)],
         [Input("load-data-button", "n_clicks"), Input("reset-chart-button", "n_clicks")],
-        [State("symbol-input", "value"), 
+        [State("symbol-input", "value"),
          State("timeframe-dropdown", "value"),
          State("start-date-picker", "date"),
-         State("end-date-picker", "date")],
+         State("end-date-picker", "date"),
+         State("data-file-dropdown", "value")],
         prevent_initial_call=True
     )
-    def load_chart_data(load_clicks, reset_clicks, symbol, timeframe, start_date, end_date):
+    def load_chart_data(load_clicks, reset_clicks, symbol, timeframe, start_date, end_date, selected_file_path):
         triggered_id = dash.callback_context.triggered[0]["prop_id"].split(".")[0]
         
         if triggered_id == "load-data-button" and load_clicks:
@@ -2248,69 +2328,91 @@ def create_app():
                 # 准备图表数据
                 chart_data = prepare_data_for_chart(df)
                 
-                # 获取交易记录
-                df_trades = fetch_trades(exchange, symbol, since, until)
-                #df_trades.to_excel("trades.xlsx", index=False)
-                #print("原始交易文件已保存为 df_trades.xlsx")
-                # 合并交易记录为仓位信息
-                if not df_trades.empty:
-                    positions_df = merge_trades_to_positions(df_trades)
-                    
-                    # 准备仓位数据用于图表展示 - 新的格式
-                    positions_data = []
-                    
-                    if not positions_df.empty:
-                        logger.info(f"处理 {len(positions_df)} 个仓位用于图表展示")
-                        
-                        for _, pos in positions_df.iterrows():
-                            # 检查仓位是否有有效的开仓和平仓时间
-                            if pd.notna(pos['open_time']) and pd.notna(pos['close_time']):
-                                # 将时间转换为Unix时间戳（秒）以匹配K线数据的 time 格式
-                                # 直接使用时间戳，不做额外的时区处理，避免时间偏移
-                                open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
-                                close_timestamp = int(pd.to_datetime(pos['close_time']).timestamp())
-                                
-                                # 创建仓位数据对象，包含开仓和平仓的完整信息
-                                position_data = {
-                                    'position_id': str(pos.name),  # 使用DataFrame索引作为唯一标识
-                                    'side': pos['side'],  # 'long' 或 'short'
-                                    'open_time': open_timestamp,
-                                    'close_time': close_timestamp,
-                                    'open_price': float(pos['open_price']),
-                                    'close_price': float(pos['close_price']),
-                                    'amount': float(pos['amount']),
-                                    'profit': float(pos['profit']),
-                                    # 格式化的时间字符串（北京时间）
-                                    'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
-                                    'close_time_formatted': pos['close_time'].strftime('%Y-%m-%d %H:%M:%S'),
-                                    'is_profit': pos['profit'] >= 0
-                                }
-                                
-                                positions_data.append(position_data)
-                            elif pd.notna(pos['open_time']) and pos.get('is_open', False):
-                                # 仅有开仓信息的持仓，直接使用时间戳，不做额外的时区处理
-                                open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
-                                
-                                position_data = {
-                                    'position_id': str(pos.name),
-                                    'side': pos['side'],
-                                    'open_time': open_timestamp,
-                                    'close_time': None,  # 未平仓
-                                    'open_price': float(pos['open_price']),
-                                    'close_price': None,
-                                    'amount': float(pos['amount']),
-                                    'profit': float(pos['profit']),
-                                    'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
-                                    'close_time_formatted': '持仓中',
-                                    'is_open': True,
-                                    'is_profit': pos['profit'] >= 0
-                                }
-                                
-                                positions_data.append(position_data)
+                # 从CSV文件加载仓位数据
+                positions_data = []
+                if selected_file_path and os.path.exists(selected_file_path):
+                    # 直接从CSV文件加载仓位数据
+                    csv_positions_data = load_positions_from_csv(selected_file_path, symbol)
+
+                    if csv_positions_data:
+                        logger.info(f"从CSV文件加载了 {len(csv_positions_data)} 个仓位")
+                        positions_data = csv_positions_data
+                    else:
+                        logger.warning(f"CSV文件中没有找到 {symbol} 的仓位数据")
                 else:
-                    positions_df = pd.DataFrame()
-                    positions_data = []
+                    logger.warning(f"未选择有效的数据文件或文件不存在: {selected_file_path}")
+
+                # 如果CSV中没有数据，尝试从API获取交易记录（备用方案）
+                if not positions_data:
+                    logger.info("CSV文件中没有数据，尝试从API获取交易记录")
+                    df_trades = fetch_trades(exchange, symbol, since, until)
+
+                    # 合并交易记录为仓位信息
+                    if not df_trades.empty:
+                        positions_df = merge_trades_to_positions(df_trades)
+
+                        # 准备仓位数据用于图表展示 - 新的格式
+                        api_positions_data = []
+
+                        if not positions_df.empty:
+                            logger.info(f"处理 {len(positions_df)} 个仓位用于图表展示")
+
+                            for _, pos in positions_df.iterrows():
+                                # 检查仓位是否有有效的开仓和平仓时间
+                                if pd.notna(pos['open_time']) and pd.notna(pos['close_time']):
+                                    # 将时间转换为Unix时间戳（秒）以匹配K线数据的 time 格式
+                                    # 直接使用时间戳，不做额外的时区处理，避免时间偏移
+                                    open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
+                                    close_timestamp = int(pd.to_datetime(pos['close_time']).timestamp())
+
+                                    # 创建仓位数据对象，包含开仓和平仓的完整信息
+                                    position_data = {
+                                        'position_id': str(pos.name),  # 使用DataFrame索引作为唯一标识
+                                        'side': pos['side'],  # 'long' 或 'short'
+                                        'open_time': open_timestamp,
+                                        'close_time': close_timestamp,
+                                        'open_price': float(pos['open_price']),
+                                        'close_price': float(pos['close_price']),
+                                        'amount': float(pos['amount']),
+                                        'profit': float(pos['profit']),
+                                        # 格式化的时间字符串（北京时间）
+                                        'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                        'close_time_formatted': pos['close_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                        'is_profit': pos['profit'] >= 0
+                                    }
+
+                                    api_positions_data.append(position_data)
+                                elif pd.notna(pos['open_time']) and pos.get('is_open', False):
+                                    # 仅有开仓信息的持仓，直接使用时间戳，不做额外的时区处理
+                                    open_timestamp = int(pd.to_datetime(pos['open_time']).timestamp())
+
+                                    position_data = {
+                                        'position_id': str(pos.name),
+                                        'side': pos['side'],
+                                        'open_time': open_timestamp,
+                                        'close_time': None,  # 未平仓
+                                        'open_price': float(pos['open_price']),
+                                        'close_price': None,
+                                        'amount': float(pos['amount']),
+                                        'profit': float(pos['profit']),
+                                        'open_time_formatted': pos['open_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                                        'close_time_formatted': '持仓中',
+                                        'is_open': True,
+                                        'is_profit': pos['profit'] >= 0
+                                    }
+
+                                    api_positions_data.append(position_data)
+
+                        # 如果API获取到了数据，使用API数据
+                        if api_positions_data:
+                            positions_data = api_positions_data
+                    else:
+                        positions_df = pd.DataFrame()
                 
+                # 确定数据来源
+                data_source = "CSV文件" if selected_file_path and os.path.exists(selected_file_path) and positions_data else "API"
+                file_name = os.path.basename(selected_file_path) if selected_file_path else "无"
+
                 # 返回更美观的状态信息
                 status_info = html.Div([
                     dbc.Row([
@@ -2322,12 +2424,17 @@ def create_app():
                         ], width=12),
                         dbc.Col([
                             html.Div([
+                                html.Span("数据来源: ", className="fw-bold small me-1"),
+                                html.Span(f"{data_source}", className="text-info small"),
+                                html.Span(f" ({file_name})" if data_source == "CSV文件" else "", className="text-muted small")
+                            ], className="d-flex align-items-center mb-1")
+                        ], width=12),
+                        dbc.Col([
+                            html.Div([
                                 html.Span("K线数据: ", className="fw-bold small me-1"),
                                 html.Span(f"{len(df)} 条", className="text-success small"),
-                                html.Span(" | 交易标记: ", className="fw-bold small mx-1"),
-                                html.Span(f"{len(positions_data)} 个", className="text-info small"),
-                                html.Span(" | 合并仓位: ", className="fw-bold small mx-1"),
-                                html.Span(f"{len(positions_df)} 个", className="text-primary small")
+                                html.Span(" | 仓位标记: ", className="fw-bold small mx-1"),
+                                html.Span(f"{len(positions_data)} 个", className="text-info small")
                             ], className="d-flex align-items-center")
                         ], width=12)
                     ])
