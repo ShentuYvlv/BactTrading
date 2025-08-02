@@ -54,6 +54,10 @@ global_stats = {
     'failed_symbols': 0
 }
 
+# 失败交易对记录
+failed_symbols_list = []
+failed_symbols_lock = threading.Lock()
+
 # 全局控制变量
 shutdown_flag = threading.Event()
 csv_filename = None
@@ -380,14 +384,104 @@ def fetch_symbol_trades(symbol, time_intervals, thread_id):
         return symbol, symbol_trades
         
     except Exception as e:
+        # 记录失败的交易对
+        with failed_symbols_lock:
+            failed_symbols_list.append({
+                'symbol': symbol,
+                'error': str(e),
+                'thread_id': thread_id
+            })
+
         with stats_lock:
             global_stats['completed_symbols'] += 1
             global_stats['failed_symbols'] += 1
         thread_safe_log('error', f"[线程{thread_id}] ❌ 获取 {symbol} 交易历史失败: {str(e)}")
         return symbol, []
 
-def fetch_position_history(exchange, start_date, end_date, max_workers=5):
-    """获取指定时间段的仓位历史数据（多线程版本）"""
+def retry_failed_symbols(exchange, time_intervals, max_workers=5, max_retries=3):
+    """重试失败的交易对"""
+    global failed_symbols_list, global_stats
+
+    retry_count = 0
+
+    while retry_count < max_retries and failed_symbols_list and not shutdown_flag.is_set():
+        retry_count += 1
+
+        # 获取当前失败的交易对列表，去重
+        with failed_symbols_lock:
+            # 去重：只保留每个交易对的最新失败记录
+            unique_failed = {}
+            for item in failed_symbols_list:
+                unique_failed[item['symbol']] = item
+
+            current_failed = list(unique_failed.values())
+            failed_symbols_list.clear()  # 清空列表，准备记录新的失败
+
+        if not current_failed:
+            break
+
+        logger.info(f"\n🔄 第 {retry_count} 轮重试，处理 {len(current_failed)} 个失败的交易对")
+
+        # 分析失败原因，决定重试策略
+        rate_limit_errors = sum(1 for item in current_failed if 'too many requests' in item['error'].lower() or '429' in item['error'])
+        network_errors = sum(1 for item in current_failed if any(keyword in item['error'].lower() for keyword in ['timeout', 'connection', 'network']))
+
+        if rate_limit_errors > 0:
+            wait_time = min(30, retry_count * 10)  # 最多等待30秒
+            logger.info(f"⏳ 检测到 {rate_limit_errors} 个限流错误，等待 {wait_time} 秒后重试...")
+            time.sleep(wait_time)
+        elif network_errors > 0:
+            wait_time = min(15, retry_count * 5)  # 最多等待15秒
+            logger.info(f"🌐 检测到 {network_errors} 个网络错误，等待 {wait_time} 秒后重试...")
+            time.sleep(wait_time)
+        else:
+            # 其他错误，短暂等待
+            time.sleep(retry_count * 2)
+
+        # 重置统计信息
+        retry_symbols = [item['symbol'] for item in current_failed]
+
+        # 使用线程池重试失败的交易对
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_symbol = {
+                executor.submit(fetch_symbol_trades, symbol, time_intervals, f"重试{retry_count}-{i}"): symbol
+                for i, symbol in enumerate(retry_symbols)
+            }
+
+            retry_success = 0
+            for future in as_completed(future_to_symbol):
+                if shutdown_flag.is_set():
+                    logger.info("🛑 收到退出信号，停止重试...")
+                    break
+
+                symbol = future_to_symbol[future]
+                try:
+                    symbol_result, trades = future.result()
+                    if trades:  # 如果这次成功获取到数据
+                        retry_success += 1
+                except Exception as exc:
+                    logger.error(f'❌ 重试交易对 {symbol} 仍然失败: {exc}')
+
+        logger.info(f"✅ 第 {retry_count} 轮重试完成，成功: {retry_success}/{len(retry_symbols)}")
+
+        # 如果没有新的失败，退出重试循环
+        if not failed_symbols_list:
+            logger.info("🎉 所有交易对都已成功获取！")
+            break
+
+    # 最终报告
+    if failed_symbols_list:
+        logger.warning(f"⚠️ 经过 {retry_count} 轮重试后，仍有 {len(failed_symbols_list)} 个交易对失败")
+        logger.info("失败的交易对列表:")
+        for item in failed_symbols_list[:10]:  # 只显示前10个
+            logger.info(f"  - {item['symbol']}: {item['error']}")
+        if len(failed_symbols_list) > 10:
+            logger.info(f"  ... 还有 {len(failed_symbols_list) - 10} 个")
+    else:
+        logger.info("🎉 所有交易对都已成功处理！")
+
+def fetch_position_history(exchange, start_date, end_date, max_workers=5, max_retries=3):
+    """获取指定时间段的仓位历史数据（多线程版本，支持失败重试）"""
     global global_stats
     
     logger.info(f"正在获取 {start_date} 到 {end_date} 的仓位历史... (使用 {max_workers} 个线程)")
@@ -513,17 +607,39 @@ def fetch_position_history(exchange, start_date, end_date, max_workers=5):
                     symbol, trades = future.result()
                 except Exception as exc:
                     logger.error(f'交易对 {symbol} 处理异常: {exc}')
-        
+
+        # 重试失败的交易对
+        if failed_symbols_list and not shutdown_flag.is_set():
+            logger.info(f"\n🔄 开始重试失败的交易对，最大重试次数: {max_retries}")
+            retry_failed_symbols(exchange, time_intervals, max_workers, max_retries)
+
         # 打印最终统计信息
-        logger.info("\n" + "="*50)
-        logger.info("📊 最终统计信息:")
+        logger.info("\n" + "="*60)
+        logger.info("🎉 最终统计信息:")
         logger.info(f"交易所: {current_exchange_name.upper()}")
         logger.info(f"处理的交易对: {global_stats['completed_symbols']}/{global_stats['total_symbols']}")
         logger.info(f"成功获取数据的交易对: {global_stats['successful_symbols']}")
-        logger.info(f"失败的交易对: {global_stats['failed_symbols']}")
+        logger.info(f"最终失败的交易对: {len(failed_symbols_list)}")
         logger.info(f"总交易记录数: {global_stats['total_trades']}")
+
+        # 计算成功率
+        if global_stats['total_symbols'] > 0:
+            success_rate = (global_stats['successful_symbols'] / global_stats['total_symbols']) * 100
+            logger.info(f"成功率: {success_rate:.1f}%")
+
         logger.info(f"数据文件: {csv_filename}")
-        logger.info("="*50)
+
+        # 如果还有失败的交易对，显示详细信息
+        if failed_symbols_list:
+            logger.warning(f"\n⚠️ 仍有 {len(failed_symbols_list)} 个交易对未能成功获取:")
+            for i, item in enumerate(failed_symbols_list[:5]):  # 显示前5个
+                logger.warning(f"  {i+1}. {item['symbol']}: {item['error']}")
+            if len(failed_symbols_list) > 5:
+                logger.warning(f"  ... 还有 {len(failed_symbols_list) - 5} 个")
+        else:
+            logger.info("🎉 所有交易对都已成功处理！")
+
+        logger.info("="*60)
         
     except Exception as e:
         logger.error(f"获取仓位历史时发生错误: {str(e)}")
@@ -629,7 +745,9 @@ def main():
                         help='结束日期 (格式: YYYY-MM-DD)')
     parser.add_argument('--threads', '-t', type=int, default=5,
                         help='线程数量 (默认: 5)')
-    
+    parser.add_argument('--max-retries', '-r', type=int, default=3,
+                        help='失败交易对的最大重试次数 (默认: 3)')
+
     args = parser.parse_args()
     
     # 设置信号处理器
@@ -647,7 +765,7 @@ def main():
         init_csv_file(csv_filename)
         
         # 获取仓位历史
-        fetch_position_history(exchange, args.start_date, args.end_date, args.threads)
+        fetch_position_history(exchange, args.start_date, args.end_date, args.threads, args.max_retries)
         
         logger.info(f"✅ 任务完成！数据已保存到: {csv_filename}")
         
