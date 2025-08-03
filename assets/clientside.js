@@ -621,6 +621,15 @@ window.dash_clientside.clientside = {
      * @returns {null} - 无返回值
      */
     initializeChart: function(chartData, tradesData, showEma, showTrades, showBollinger, showRsi, showMacd, containerId) {
+        // 添加详细的调试信息
+        console.log('🔄 initializeChart 被调用', {
+            chartDataType: typeof chartData,
+            chartDataLength: chartData ? (typeof chartData === 'string' ? chartData.length : Object.keys(chartData).length) : 0,
+            tradesDataType: typeof tradesData,
+            tradesDataLength: tradesData ? (typeof tradesData === 'string' ? tradesData.length : tradesData.length) : 0,
+            showEma, showTrades, showBollinger, showRsi, showMacd
+        });
+
         // 检查LightweightCharts是否已定义
         if (typeof LightweightCharts === 'undefined') {
             console.error('LightweightCharts库未加载，尝试动态加载...');
@@ -663,16 +672,29 @@ window.dash_clientside.clientside = {
         // 如果没有数据，不渲染图表
         if (!chartData) return null;
         
-        // 解析数据
+        // 解析数据 - 检查数据类型，避免重复解析
         try {
-            chartData = JSON.parse(chartData);
-            tradesData = tradesData ? JSON.parse(tradesData) : [];
-            
+            // 如果chartData是字符串，则需要解析；如果已经是对象，则直接使用
+            if (typeof chartData === 'string') {
+                chartData = JSON.parse(chartData);
+            }
+
+            // 同样处理tradesData
+            if (tradesData) {
+                if (typeof tradesData === 'string') {
+                    tradesData = JSON.parse(tradesData);
+                }
+            } else {
+                tradesData = [];
+            }
+
             // 设置为全局变量，以便其他函数可以访问
             window.chartData = chartData;
             window.tradesData = tradesData;
         } catch (e) {
             console.error('解析图表数据失败:', e);
+            console.log('chartData类型:', typeof chartData);
+            console.log('chartData内容:', chartData);
             return null;
         }
         
@@ -2874,7 +2896,19 @@ window.dash_clientside.clientside = {
                 return 0;
             }
             
-            const positions = JSON.parse(positionsData);
+            // 安全解析仓位数据
+            let positions;
+            try {
+                if (typeof positionsData === 'string') {
+                    positions = JSON.parse(positionsData);
+                } else {
+                    positions = positionsData;
+                }
+            } catch (e) {
+                console.error('解析仓位数据失败:', e);
+                return 0;
+            }
+
             if (!positions || positions.length === 0) {
                 console.log('解析后的仓位数据为空');
                 return 0;
@@ -3252,8 +3286,19 @@ window.dash_clientside.clientside = {
             
             console.log(`尝试跳转到仓位编号: ${positionNumber}`);
             
-            // 解析仓位数据
-            const positions = JSON.parse(positionsData);
+            // 安全解析仓位数据
+            let positions;
+            try {
+                if (typeof positionsData === 'string') {
+                    positions = JSON.parse(positionsData);
+                } else {
+                    positions = positionsData;
+                }
+            } catch (e) {
+                console.error('解析仓位数据失败:', e);
+                return 0;
+            }
+
             if (!positions || positions.length === 0) {
                 console.log('没有可用的仓位数据');
                 return 0;

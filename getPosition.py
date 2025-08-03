@@ -646,10 +646,10 @@ def fetch_position_history(exchange, start_date, end_date, max_workers=5, max_re
         raise
 
 def rebuild_positions_from_trades(trades, symbol):
-    """从交易记录重建仓位历史"""
+    """从交易记录重建仓位历史（修复逐笔平仓问题）"""
     positions = []
     current_position = None
-    
+
     for trade in trades:
         if current_position is None:
             # 开始新仓位
@@ -667,6 +667,8 @@ def rebuild_positions_from_trades(trades, symbol):
                 'exit_time': None,
                 'exit_time_formatted': None,
                 'pnl': 0,
+                'pnl_before_fees': 0,
+                'total_fees': trade['fee']['cost'] if trade['fee'] else 0,
                 'pnl_records': []
             }
         else:
@@ -675,33 +677,43 @@ def rebuild_positions_from_trades(trades, symbol):
                 (current_position['side'] == 'long' and trade['side'] == 'sell') or
                 (current_position['side'] == 'short' and trade['side'] == 'buy')
             )
-            
+
             if is_opposite_side:
                 # 平仓交易
                 current_position['trades'].append(trade)
-                
+
+                # 累积手续费
+                if trade['fee']:
+                    current_position['total_fees'] += trade['fee']['cost']
+
+                # 计算这笔平仓的PnL
+                close_amount = min(trade['amount'], current_position['amount'])
+                if current_position['side'] == 'long':
+                    partial_pnl = (trade['price'] - current_position['entry_price']) * close_amount
+                else:
+                    partial_pnl = (current_position['entry_price'] - trade['price']) * close_amount
+
+                # 累积PnL
+                current_position['pnl_before_fees'] += partial_pnl
+                current_position['pnl'] = current_position['pnl_before_fees'] - current_position['total_fees']
+
                 if trade['amount'] >= current_position['amount']:
                     # 完全平仓或反向开仓
                     current_position['exit_price'] = trade['price']
                     current_position['exit_time'] = trade['timestamp']
                     current_position['exit_time_formatted'] = datetime.fromtimestamp(trade['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
                     current_position['status'] = 'closed'
-                    
-                    # 计算PnL
-                    if current_position['side'] == 'long':
-                        current_position['pnl'] = (trade['price'] - current_position['entry_price']) * current_position['amount']
-                    else:
-                        current_position['pnl'] = (current_position['entry_price'] - trade['price']) * current_position['amount']
-                    
+
                     positions.append(current_position.copy())
-                    
+
                     # 如果有剩余数量，开始新的反向仓位
                     if trade['amount'] > current_position['amount']:
+                        remaining_amount = trade['amount'] - current_position['amount']
                         current_position = {
                             'symbol': symbol,
                             'position_id': f"{symbol}_{trade['timestamp']}_reverse",
                             'side': 'long' if trade['side'] == 'buy' else 'short',
-                            'amount': trade['amount'] - current_position['amount'],
+                            'amount': remaining_amount,
                             'entry_price': trade['price'],
                             'entry_time': trade['timestamp'],
                             'entry_time_formatted': datetime.fromtimestamp(trade['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
@@ -711,26 +723,37 @@ def rebuild_positions_from_trades(trades, symbol):
                             'exit_time': None,
                             'exit_time_formatted': None,
                             'pnl': 0,
+                            'pnl_before_fees': 0,
+                            'total_fees': trade['fee']['cost'] if trade['fee'] else 0,
                             'pnl_records': []
                         }
                     else:
                         current_position = None
                 else:
-                    # 部分平仓
+                    # 部分平仓 - 减少仓位数量，但继续持有
                     current_position['amount'] -= trade['amount']
+                    # 更新最后平仓价格和时间（用于显示）
+                    current_position['exit_price'] = trade['price']
+                    current_position['exit_time'] = trade['timestamp']
+                    current_position['exit_time_formatted'] = datetime.fromtimestamp(trade['timestamp'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
             else:
                 # 同向交易（加仓）
                 current_position['trades'].append(trade)
+
+                # 累积手续费
+                if trade['fee']:
+                    current_position['total_fees'] += trade['fee']['cost']
+
                 # 计算平均入场价格
                 total_value = current_position['entry_price'] * current_position['amount'] + trade['price'] * trade['amount']
                 total_amount = current_position['amount'] + trade['amount']
                 current_position['entry_price'] = total_value / total_amount
                 current_position['amount'] = total_amount
-    
+
     # 如果有未关闭的仓位，也添加到结果中
     if current_position is not None:
         positions.append(current_position)
-    
+
     return positions
 
 def main():

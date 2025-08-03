@@ -1,5 +1,5 @@
 import dash
-from dash import html, dcc, callback, Input, Output, State, ClientsideFunction
+from dash import html, dcc, callback, Input, Output, State, ClientsideFunction, callback_context
 import dash_bootstrap_components as dbc
 import os
 import pandas as pd
@@ -1259,7 +1259,128 @@ def create_app():
                         console.error('Lightweight Charts 库加载失败!');
                     }
                 });
-                
+
+                // 定义客户端回调函数
+                window.dash_clientside = Object.assign({}, window.dash_clientside, {
+                    clientside: {
+                        initializeChart: function(chartData, tradesData, showEma, showTrades, showBollinger, showRsi, showMacd) {
+                            console.log('🔄 initializeChart 被调用', {
+                                chartDataLength: chartData ? chartData.length : 0,
+                                tradesDataLength: tradesData ? tradesData.length : 0,
+                                showEma, showTrades, showBollinger, showRsi, showMacd
+                            });
+
+                            // 创建图表容器HTML
+                            const chartHtml = `
+                                <div id="tradingview-chart" style="
+                                    width: 100%;
+                                    height: 600px;
+                                    background-color: #1c2030;
+                                    border: 1px solid #2B2B43;
+                                    border-radius: 8px;
+                                    position: relative;
+                                "></div>
+                            `;
+
+                            // 使用setTimeout确保DOM更新后再初始化图表
+                            setTimeout(function() {
+                                const chartElement = document.getElementById('tradingview-chart');
+                                if (chartElement && typeof LightweightCharts !== 'undefined') {
+                                    console.log('📊 开始创建图表...');
+
+                                    // 清除之前的图表
+                                    if (chartElement._chart) {
+                                        chartElement._chart.remove();
+                                    }
+
+                                    // 如果没有数据，显示提示信息
+                                    if (!chartData || chartData.length === 0) {
+                                        chartElement.innerHTML = `
+                                            <div style="
+                                                width: 100%;
+                                                height: 100%;
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: center;
+                                                color: #9aa1b9;
+                                                font-size: 16px;
+                                            ">暂无图表数据</div>
+                                        `;
+                                        return;
+                                    }
+
+                                    // 创建新图表
+                                    const chart = LightweightCharts.createChart(chartElement, {
+                                        width: chartElement.clientWidth,
+                                        height: 600,
+                                        layout: {
+                                            background: { color: '#1c2030' },
+                                            textColor: '#d1d4dc',
+                                        },
+                                        grid: {
+                                            vertLines: { color: '#2B2B43' },
+                                            horzLines: { color: '#2B2B43' },
+                                        },
+                                        crosshair: {
+                                            mode: LightweightCharts.CrosshairMode.Normal,
+                                        },
+                                        rightPriceScale: {
+                                            borderColor: '#2B2B43',
+                                        },
+                                        timeScale: {
+                                            borderColor: '#2B2B43',
+                                            timeVisible: true,
+                                            secondsVisible: false,
+                                        },
+                                    });
+
+                                    // 添加K线数据
+                                    const candlestickSeries = chart.addCandlestickSeries({
+                                        upColor: '#26a69a',
+                                        downColor: '#ef5350',
+                                        borderVisible: false,
+                                        wickUpColor: '#26a69a',
+                                        wickDownColor: '#ef5350',
+                                    });
+
+                                    console.log('📈 设置K线数据，数据量:', chartData.length);
+                                    candlestickSeries.setData(chartData);
+
+                                    // 添加交易标记
+                                    if (showTrades && tradesData && tradesData.length > 0) {
+                                        console.log('🎯 添加交易标记，标记数量:', tradesData.length);
+                                        const markers = tradesData.map(trade => ({
+                                            time: trade.open_time,
+                                            position: trade.side === 'long' ? 'belowBar' : 'aboveBar',
+                                            color: trade.side === 'long' ? '#26a69a' : '#ef5350',
+                                            shape: trade.side === 'long' ? 'arrowUp' : 'arrowDown',
+                                            text: `${trade.side.toUpperCase()} @${trade.open_price}`
+                                        }));
+                                        candlestickSeries.setMarkers(markers);
+                                    }
+
+                                    // 响应式调整
+                                    const resizeObserver = new ResizeObserver(entries => {
+                                        if (entries.length === 0 || entries[0].target !== chartElement) return;
+                                        const newRect = entries[0].contentRect;
+                                        chart.applyOptions({ width: newRect.width });
+                                    });
+                                    resizeObserver.observe(chartElement);
+
+                                    // 存储图表实例
+                                    chartElement._chart = chart;
+
+                                    console.log('✅ 图表创建完成');
+                                } else {
+                                    console.error('❌ 图表元素或LightweightCharts库未找到');
+                                }
+                            }, 100);
+
+                            return chartHtml;
+                        }
+                    }
+                });
+
                 // 添加拖动功能
                 window.addEventListener('load', function() {
                     // 导航控制器拖动功能 - 优化版本
@@ -1872,6 +1993,35 @@ def create_app():
                         width: 150px;
                     }
                 }
+
+                /* 时间周期按钮样式 */
+                .timeframe-btn {
+                    min-width: 50px;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                }
+
+                .timeframe-btn:hover {
+                    transform: translateY(-1px);
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }
+
+                .timeframe-btn.active {
+                    background-color: #0d6efd !important;
+                    border-color: #0d6efd !important;
+                    color: white !important;
+                    box-shadow: 0 2px 8px rgba(13, 110, 253, 0.3);
+                }
+
+                /* 响应式时间周期按钮 */
+                @media (max-width: 768px) {
+                    .timeframe-btn {
+                        min-width: 40px;
+                        font-size: 0.75rem;
+                        padding: 0.25rem 0.5rem;
+                    }
+                }
             </style>
         </head>
         <body>
@@ -1890,9 +2040,12 @@ def create_app():
         {'label': '1分钟', 'value': '1m'},
         {'label': '5分钟', 'value': '5m'},
         {'label': '15分钟', 'value': '15m'},
+        {'label': '30分钟', 'value': '30m'},
         {'label': '1小时', 'value': '1h'},
         {'label': '4小时', 'value': '4h'},
+        {'label': '8小时', 'value': '8h'},
         {'label': '1天', 'value': '1d'},
+        {'label': '1周', 'value': '1w'},
     ]
     
     # 将币种数据转换为选项列表
@@ -2150,6 +2303,30 @@ def create_app():
         
             # 右侧区域 - 图表（80%宽度）
             dbc.Col([
+                # 时间周期选择栏
+                dbc.Card([
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Span("时间周期:", className="me-3 fw-bold"),
+                                    dbc.ButtonGroup([
+                                        dbc.Button("1分", id="timeframe-btn-1m", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("5分", id="timeframe-btn-5m", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("15分", id="timeframe-btn-15m", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("30分", id="timeframe-btn-30m", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("1小时", id="timeframe-btn-1h", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("4小时", id="timeframe-btn-4h", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("8小时", id="timeframe-btn-8h", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("1天", id="timeframe-btn-1d", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                        dbc.Button("1周", id="timeframe-btn-1w", size="sm", outline=True, color="primary", className="timeframe-btn"),
+                                    ], className="me-3"),
+                                ], className="d-flex align-items-center")
+                            ], width=12)
+                        ])
+                    ], className="py-2")
+                ], className="mb-2 border-secondary"),
+
                 # 图表卡片
         dbc.Card([
             dbc.CardBody([
@@ -2281,6 +2458,106 @@ def create_app():
         end_ts = int(end.timestamp() * 1000)
         
         return start_ts, end_ts
+
+    # 时间周期选择回调（双向同步：按钮点击和dropdown变化）
+    @app.callback(
+        [Output("timeframe-dropdown", "value")] +
+        [Output(f"timeframe-btn-{tf}", "outline") for tf in ["1m", "5m", "15m", "30m", "1h", "4h", "8h", "1d", "1w"]] +
+        [Output(f"timeframe-btn-{tf}", "color") for tf in ["1m", "5m", "15m", "30m", "1h", "4h", "8h", "1d", "1w"]],
+        [Input(f"timeframe-btn-{tf}", "n_clicks") for tf in ["1m", "5m", "15m", "30m", "1h", "4h", "8h", "1d", "1w"]] +
+        [Input("timeframe-dropdown", "value")],
+        prevent_initial_call=False  # 允许初始调用以设置默认状态
+    )
+    def update_timeframe_selection(*args):
+        """处理时间周期按钮点击和dropdown变化的双向同步"""
+        ctx = callback_context
+
+        # 时间周期映射
+        timeframe_map = {
+            "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+            "1h": "1h", "4h": "4h", "8h": "8h", "1d": "1d", "1w": "1w"
+        }
+        timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "8h", "1d", "1w"]
+
+        # 默认值
+        current_timeframe = "1h"
+        dropdown_value = "1h"
+
+        if ctx.triggered:
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+            if trigger_id.startswith('timeframe-btn-'):
+                # 按钮被点击
+                current_timeframe = trigger_id.replace('timeframe-btn-', '')
+                dropdown_value = timeframe_map.get(current_timeframe, "1h")
+            elif trigger_id == 'timeframe-dropdown':
+                # dropdown被改变
+                dropdown_value = args[-1]  # 最后一个参数是dropdown的值
+                current_timeframe = dropdown_value
+        else:
+            # 初始调用，使用dropdown的当前值
+            dropdown_value = args[-1] if args[-1] else "1h"
+            current_timeframe = dropdown_value
+
+        # 更新按钮样式：被选中的按钮不使用outline，其他使用outline
+        outline_values = [tf != current_timeframe for tf in timeframes]
+        color_values = ["primary" for _ in timeframes]
+
+        return [dropdown_value] + outline_values + color_values
+
+    # 时间周期改变时自动重新加载数据
+    @app.callback(
+        [Output("chart-data-store", "data", allow_duplicate=True),
+         Output("trades-data-store", "data", allow_duplicate=True),
+         Output("loading-spinner", "children", allow_duplicate=True),
+         Output("status-info", "children", allow_duplicate=True)],
+        [Input("timeframe-dropdown", "value")],
+        [State("symbol-input", "value"),
+         State("start-date-picker", "date"),
+         State("end-date-picker", "date"),
+         State("data-file-dropdown", "value")],
+        prevent_initial_call=True
+    )
+    def reload_data_on_timeframe_change(timeframe, symbol, start_date, end_date, selected_file_path):
+        """当时间周期改变时，自动重新加载数据"""
+        if not symbol or not timeframe:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        # 显示加载状态
+        loading_spinner = dbc.Spinner(
+            html.Div("正在切换时间周期，请稍候...", className="text-center p-3"),
+            size="sm",
+            color="primary"
+        )
+
+        try:
+            # 获取K线数据
+            since, until = calculate_time_range(start_date, end_date)
+            df = fetch_ohlcv_data(exchange, symbol, timeframe, since, until)
+
+            if df.empty:
+                return [], [], html.Div("未获取到K线数据", className="text-warning p-2"), \
+                       html.Div("时间周期切换完成，但未获取到数据", className="text-warning p-2")
+
+            # 从CSV加载仓位数据
+            csv_file_path = selected_file_path or get_latest_csv_file()
+            positions_data = load_positions_from_csv(csv_file_path, symbol=symbol) if csv_file_path else []
+
+            # 准备图表数据
+            chart_data = prepare_data_for_chart(df)
+
+            # 状态信息
+            status_info = html.Div([
+                html.Span(f"时间周期: {timeframe} | ", className="fw-bold small me-1"),
+                html.Span(f"K线数据: {len(df)} 条 | ", className="text-success small me-1"),
+                html.Span(f"仓位标记: {len(positions_data)} 个", className="text-info small")
+            ], className="p-2 border border-secondary rounded bg-dark")
+
+            return chart_data, positions_data, html.Div(), status_info
+
+        except Exception as e:
+            logger.error(f"切换时间周期时出错: {e}")
+            return [], [], html.Div(), html.Div(f"切换时间周期失败: {str(e)}", className="text-danger p-2")
 
     # 文件选择回调 - 当用户选择不同的数据文件时更新币种列表
     @app.callback(
@@ -2610,7 +2887,7 @@ def create_app():
          Output("symbol-input", "value"),  # 更新交易对输入框
          Output("start-date-picker", "date"),  # 更新开始日期
          Output("end-date-picker", "date"),  # 更新结束日期
-         Output("timeframe-dropdown", "value")],  # 更新周期选择器
+         Output("timeframe-dropdown", "value", allow_duplicate=True)],  # 更新周期选择器
         [Input(f"symbol-{symbol.replace('/', '-').replace(':', '_')}", "n_clicks") for symbol in symbols_data.keys()],
         [State("data-file-dropdown", "value")],  # 添加当前选择的文件作为状态
         prevent_initial_call=True
