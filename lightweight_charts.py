@@ -14,9 +14,36 @@ import hashlib
 import pickle
 import threading
 import urllib3
+import glob
 
 # 加载.env文件中的环境变量
 dotenv.load_dotenv()
+
+def get_latest_csv_file():
+    """获取data目录中最新的CSV文件"""
+    try:
+        # 获取data目录路径
+        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+
+        if not os.path.exists(data_dir):
+            logger.warning(f"data目录不存在: {data_dir}")
+            return None
+
+        # 查找所有CSV文件
+        csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
+
+        if not csv_files:
+            logger.warning("data目录中没有找到CSV文件")
+            return None
+
+        # 按修改时间排序，返回最新的文件
+        latest_file = max(csv_files, key=os.path.getmtime)
+        logger.info(f"找到最新的CSV文件: {os.path.basename(latest_file)}")
+        return latest_file
+
+    except Exception as e:
+        logger.error(f"获取最新CSV文件时出错: {e}")
+        return None
 
 # 添加函数：从CSV文件加载币种数据
 def load_symbols_from_csv(csv_file_path, min_trades=5):
@@ -2576,7 +2603,7 @@ def create_app():
     
     # 币种点击加载数据回调
     @app.callback(
-        [Output("chart-data-store", "data", allow_duplicate=True), 
+        [Output("chart-data-store", "data", allow_duplicate=True),
          Output("trades-data-store", "data", allow_duplicate=True),
          Output("loading-spinner", "children", allow_duplicate=True),
          Output("status-info", "children", allow_duplicate=True),
@@ -2585,6 +2612,7 @@ def create_app():
          Output("end-date-picker", "date"),  # 更新结束日期
          Output("timeframe-dropdown", "value")],  # 更新周期选择器
         [Input(f"symbol-{symbol.replace('/', '-').replace(':', '_')}", "n_clicks") for symbol in symbols_data.keys()],
+        [State("data-file-dropdown", "value")],  # 添加当前选择的文件作为状态
         prevent_initial_call=True
     )
     def load_data_from_symbol_click(*args):
@@ -2592,6 +2620,9 @@ def create_app():
         ctx = dash.callback_context
         if not ctx.triggered:
             return [dash.no_update] * 8
+
+        # 最后一个参数是选择的文件路径
+        selected_file_path = args[-1] if args else None
         
         # 获取被点击的组件ID
         triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
@@ -2615,11 +2646,11 @@ def create_app():
                 default_timeframe = saved_state.get('timeframe', '15m')
                 print(f"使用保存的币种状态: {saved_state}")
             else:
-                # 使用默认值 - 从最近的交易开始而不是固定日期
-                csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
-                
+                # 使用前端选择的文件，如果没有选择则使用最新文件
+                csv_file_path = selected_file_path or get_latest_csv_file()
+
                 # 尝试加载该币种的交易记录
-                positions = load_positions_from_csv(csv_file_path, symbol=clicked_symbol)
+                positions = load_positions_from_csv(csv_file_path, symbol=clicked_symbol) if csv_file_path else []
                 
                 # 查找最近一笔交易的时间
                 recent_trade_date = None
@@ -2636,11 +2667,13 @@ def create_app():
                 
                 # 如果找不到交易记录，则使用默认日期
                 if not recent_trade_date:
-                    recent_trade_date = datetime(2024, 11, 20)
+                    # 默认开始日期设置为6个月前
+                    recent_trade_date = datetime.now() - timedelta(days=180)
                     logger.info(f"未找到{clicked_symbol}的交易记录，使用默认开始日期: {recent_trade_date}")
-                
+
                 default_start_date = recent_trade_date
-                default_end_date = datetime(2025, 5, 30)
+                # 结束日期设置为当前时间，确保不会出现开始时间大于结束时间的问题
+                default_end_date = datetime.now()
                 default_timeframe = '15m'
             
             # 转换为时间戳（毫秒）
@@ -2674,8 +2707,8 @@ def create_app():
             chart_data = prepare_data_for_chart(df)
             
             # 从CSV直接加载仓位数据
-            csv_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'positions_realtime_20240701_20250530.csv')
-            positions_data = load_positions_from_csv(csv_file_path, symbol=clicked_symbol)
+            csv_file_path = selected_file_path or get_latest_csv_file()
+            positions_data = load_positions_from_csv(csv_file_path, symbol=clicked_symbol) if csv_file_path else []
             
             # 返回更美观的状态信息
             status_info = html.Div([
@@ -3272,4 +3305,5 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, port=8051) 
+    # 允许局域网访问：host='0.0.0.0' 表示监听所有网络接口
+    app.run(debug=True, host='0.0.0.0', port=8051)
