@@ -6,10 +6,8 @@
 """
 
 import socket
-import subprocess
-import sys
-import os
 from lightweight_charts import create_app
+from config import get_server_config
 
 def get_local_ip():
     """获取本机局域网IP地址"""
@@ -37,15 +35,17 @@ def main():
     """主函数"""
     print("🚀 启动交易图表服务器")
     print("="*60)
+
+    server_config = get_server_config()
     
     # 获取本机IP
     local_ip = get_local_ip()
-    port = 8051
+    port = server_config['port']
     
     # 检查端口是否可用
     if not check_port_available(port):
         print(f"⚠️ 端口 {port} 已被占用，尝试使用其他端口...")
-        for test_port in range(8052, 8060):
+        for test_port in range(port + 1, server_config['port_fallback_end'] + 1):
             if check_port_available(test_port):
                 port = test_port
                 break
@@ -56,7 +56,7 @@ def main():
     print(f"📡 服务器配置:")
     print(f"   本机IP: {local_ip}")
     print(f"   端口: {port}")
-    print(f"   调试模式: 开启")
+    print(f"   调试模式: {'开启' if server_config['debug'] else '关闭'}")
     
     print(f"\n🌐 访问地址:")
     print(f"   本机访问: http://127.0.0.1:{port}")
@@ -86,10 +86,10 @@ def main():
         # 创建并启动应用
         app = create_app()
         app.run(
-            debug=True,
-            host='0.0.0.0',  # 监听所有网络接口
+            debug=server_config['debug'],
+            host=server_config['host'],
             port=port,
-            use_reloader=False  # 避免重复启动
+            use_reloader=server_config['use_reloader']
         )
     except KeyboardInterrupt:
         print(f"\n🛑 服务器已停止")

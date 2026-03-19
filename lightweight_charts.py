@@ -9,15 +9,21 @@ import ccxt
 import logging
 import time
 from datetime import datetime, timedelta
-import dotenv
 import hashlib
 import pickle
 import threading
 import urllib3
 import glob
 
-# 加载.env文件中的环境变量
-dotenv.load_dotenv()
+from config import (
+    get_chart_defaults,
+    get_common_ccxt_config,
+    get_env_int,
+    get_env_str,
+    get_server_config,
+)
+
+CHART_DEFAULTS = get_chart_defaults()
 
 def get_latest_csv_file():
     """获取data目录中最新的CSV文件"""
@@ -46,7 +52,7 @@ def get_latest_csv_file():
         return None
 
 # 添加函数：从CSV文件加载币种数据
-def load_symbols_from_csv(csv_file_path, min_trades=5):
+def load_symbols_from_csv(csv_file_path, min_trades=None):
     """从CSV文件中加载币种数据，并按交易次数过滤
     
     Args:
@@ -56,6 +62,8 @@ def load_symbols_from_csv(csv_file_path, min_trades=5):
     Returns:
         dict: 币种列表及其交易次数，按交易次数降序排序
     """
+    min_trades = CHART_DEFAULTS['min_trades'] if min_trades is None else min_trades
+
     try:
         # 检查文件是否存在
         if not os.path.exists(csv_file_path):
@@ -371,27 +379,15 @@ def initialize_exchange():
     # 从环境变量中获取API密钥
     API_KEY = os.getenv('BINANCE_API_KEY')
     API_SECRET = os.getenv('BINANCE_API_SECRET')
-    
-    # 设置币安交易所配置 - 与TEST_ca.py中成功的代理配置保持一致
-    config = {
-        'enableRateLimit': True,
-        'timeout': 60000,
-        'proxies': {
-            'http': 'socks5://127.0.0.1:10808',
-            'https': 'socks5://127.0.0.1:10808'
-        },
-        'options': {
-            'defaultType': 'future',  # 使用U本位永续合约
-            'adjustForTimeDifference': True,  # 自动调整时间差异
-            'recvWindow': 60000,  # 增加接收窗口
-            'warnOnFetchOHLCVLimitArgument': False,
-            'createMarketBuyOrderRequiresPrice': False,
-            'fetchOHLCVWarning': False,
-        },
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        },
-        'verify': False,  # 禁用SSL证书验证
+
+    config = get_common_ccxt_config()
+    config['options'] = {
+        'defaultType': get_env_str('BINANCE_DEFAULT_TYPE', 'future'),
+        'adjustForTimeDifference': True,
+        'recvWindow': get_env_int('CCXT_RECV_WINDOW', 60000),
+        'warnOnFetchOHLCVLimitArgument': False,
+        'createMarketBuyOrderRequiresPrice': False,
+        'fetchOHLCVWarning': False,
     }
     
     # 如果提供了API密钥，添加到配置中
@@ -421,8 +417,11 @@ def initialize_exchange():
     
     return exchange
 
-def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=None, until=None):
+def fetch_ohlcv_data(exchange, symbol=None, timeframe=None, since=None, until=None):
     """获取K线历史数据"""
+    symbol = symbol or CHART_DEFAULTS['symbol']
+    timeframe = timeframe or CHART_DEFAULTS['timeframe']
+
     try:
         logger.info(f"获取 {symbol} 的 {timeframe} K线数据, 时间范围: {since} - {until}")
         
@@ -469,8 +468,8 @@ def fetch_ohlcv_data(exchange, symbol='NXPC/USDT:USDT', timeframe='1h', since=No
             if symbol not in exchange.markets:
                 available_symbols = [s for s in exchange.markets.keys() if 'USDT' in s][:10]
                 logger.warning(f"交易对 {symbol} 不存在! 可用的USDT交易对示例: {available_symbols}")
-                # 尝试使用NXPC/USDT作为备选
-                symbol = 'NXPC/USDT:USDT'
+                # 尝试使用配置中的备选交易对
+                symbol = CHART_DEFAULTS['fallback_symbol']
                 logger.info(f"使用备选交易对: {symbol}")
         except Exception as e:
             logger.error(f"加载市场数据失败: {str(e)}")
@@ -655,8 +654,10 @@ def prepare_data_for_chart(df):
         'histogram': histogram_data
     }
 
-def fetch_trades(exchange, symbol='NXPC/USDT:USDT', since=None, until=None, limit=100):
+def fetch_trades(exchange, symbol=None, since=None, until=None, limit=100):
     """获取个人交易记录，支持时间范围过滤，自动分批查询"""
+    symbol = symbol or CHART_DEFAULTS['symbol']
+
     try:
         # 检查是否有API密钥
         if not exchange.apiKey or not exchange.secret:
@@ -2137,7 +2138,7 @@ def create_app():
                         dcc.Input(
                             id="symbol-input",
                             type="text",
-                            value="NXPC/USDT:USDT",
+                            value=CHART_DEFAULTS['symbol'],
                                         className="form-control form-control-sm w-100"
                         )
                                 ], width=12, className="mb-2"),
@@ -2148,7 +2149,7 @@ def create_app():
                         dcc.Dropdown(
                             id="timeframe-dropdown",
                             options=timeframe_options,
-                            value="1h",
+                            value=CHART_DEFAULTS['timeframe'],
                             clearable=False,
                             className="dash-dropdown-sm"
                         )
@@ -2159,7 +2160,7 @@ def create_app():
                         html.Label("开始日期", className="form-label mb-1"),
                         dcc.DatePickerSingle(
                             id="start-date-picker",
-                                        date=datetime(2025, 5, 15).date(),
+                                        date=CHART_DEFAULTS['start_date'],
                             display_format="YYYY-MM-DD",
                             className="w-100"
                         )
@@ -2170,7 +2171,7 @@ def create_app():
                         html.Label("结束日期", className="form-label mb-1"),
                         dcc.DatePickerSingle(
                             id="end-date-picker",
-                                        date=datetime(2025, 5, 16).date(),
+                                        date=CHART_DEFAULTS['end_date'],
                             display_format="YYYY-MM-DD",
                             className="w-100"
                         )
@@ -3582,5 +3583,10 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    # 允许局域网访问：host='0.0.0.0' 表示监听所有网络接口
-    app.run(debug=True, host='0.0.0.0', port=8051)
+    server_config = get_server_config()
+    app.run(
+        debug=server_config['debug'],
+        host=server_config['host'],
+        port=server_config['port'],
+        use_reloader=server_config['use_reloader']
+    )

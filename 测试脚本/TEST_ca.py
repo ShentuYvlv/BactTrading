@@ -11,16 +11,13 @@ import urllib3
 from datetime import datetime
 from dotenv import load_dotenv
 
+from config import get_common_ccxt_config, get_env_int, get_env_str
+
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 加载.env文件中的环境变量
 load_dotenv()
-
-# 设置代理环境变量（先注释掉，测试直连）
-# os.environ['HTTP_PROXY'] = 'socks5://127.0.0.1:10808'
-# os.environ['HTTPS_PROXY'] = 'socks5://127.0.0.1:10808'
-# os.environ['ALL_PROXY'] = 'socks5://127.0.0.1:10808'
 
 # 防止Python 3.8中的事件循环关闭警告
 if sys.platform.startswith('win'):
@@ -46,22 +43,11 @@ def test_connection_with_proxy():
     API_KEY = os.getenv('BINANCE_API_KEY')
     API_SECRET = os.getenv('BINANCE_API_SECRET')
     
-    config = {
-        'enableRateLimit': True,
-        'timeout': 60000,
-        'proxies': {
-            'http': 'socks5://127.0.0.1:10808',
-            'https': 'socks5://127.0.0.1:10808'
-        },
-        'options': {
-            'defaultType': 'future',
-            'adjustForTimeDifference': True,
-            'recvWindow': 60000,
-        },
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        },
-        'verify': False,  # 禁用SSL证书验证
+    config = get_common_ccxt_config()
+    config['options'] = {
+        'defaultType': get_env_str('BINANCE_DEFAULT_TYPE', 'future'),
+        'adjustForTimeDifference': True,
+        'recvWindow': get_env_int('CCXT_RECV_WINDOW', 60000),
     }
     
     if API_KEY and API_SECRET:
@@ -86,18 +72,12 @@ def test_connection_direct():
     API_KEY = os.getenv('BINANCE_API_KEY')
     API_SECRET = os.getenv('BINANCE_API_SECRET')
     
-    config = {
-        'enableRateLimit': True,
-        'timeout': 60000,
-        'options': {
-            'defaultType': 'future',
-            'adjustForTimeDifference': True,
-            'recvWindow': 60000,
-        },
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        },
-        'verify': False,  # 禁用SSL证书验证
+    config = get_common_ccxt_config()
+    config.pop('proxies', None)
+    config['options'] = {
+        'defaultType': get_env_str('BINANCE_DEFAULT_TYPE', 'future'),
+        'adjustForTimeDifference': True,
+        'recvWindow': get_env_int('CCXT_RECV_WINDOW', 60000),
     }
     
     if API_KEY and API_SECRET:
@@ -147,7 +127,7 @@ def main():
         print("\n===== 连接诊断建议 =====")
         print("所有连接方式都失败了，可能的原因：")
         print("1. 网络连接问题")
-        print("2. 代理服务器(127.0.0.1:10808)未运行")
+        print("2. .env 中配置的代理服务器未运行")
         print("3. 防火墙阻止连接")
         print("4. 币安API服务器暂时不可用")
         print("\n建议操作：")

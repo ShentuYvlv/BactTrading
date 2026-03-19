@@ -10,7 +10,6 @@ import ssl
 import urllib3
 import pandas as pd
 from datetime import datetime, timezone
-from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from tqdm import tqdm
@@ -18,11 +17,10 @@ import signal
 import csv
 import argparse
 
+from config import get_common_ccxt_config, get_env_int, get_env_str, get_position_defaults
+
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# 加载.env文件中的环境变量
-load_dotenv()
 
 # 防止Python 3.8中的事件循环关闭警告
 if sys.platform.startswith('win'):
@@ -61,7 +59,8 @@ failed_symbols_lock = threading.Lock()
 # 全局控制变量
 shutdown_flag = threading.Event()
 csv_filename = None
-current_exchange_name = 'binance'  # 默认交易所
+POSITION_DEFAULTS = get_position_defaults()
+current_exchange_name = POSITION_DEFAULTS['exchange']
 
 def signal_handler(sig, frame):
     """处理CTRL+C信号"""
@@ -141,7 +140,7 @@ def thread_safe_log(level, message):
         elif level == 'error':
             logger.error(message)
 
-def initialize_exchange(exchange_name='binance'):
+def initialize_exchange(exchange_name=None):
     """初始化交易所连接，支持币安和OKX
     
     Args:
@@ -151,6 +150,7 @@ def initialize_exchange(exchange_name='binance'):
         交易所对象
     """
     global current_exchange_name
+    exchange_name = exchange_name or POSITION_DEFAULTS['exchange']
     current_exchange_name = exchange_name
     
     logger.info(f"正在初始化交易所: {exchange_name.upper()}")
@@ -163,25 +163,16 @@ def initialize_exchange(exchange_name='binance'):
         if not API_KEY or not API_SECRET:
             raise ValueError("未能从.env文件中读取币安API密钥，请检查BINANCE_API_KEY和BINANCE_API_SECRET")
         
-        config = {
-            'enableRateLimit': True,
-            'timeout': 60000,
-            'proxies': {
-                'http': 'socks5://127.0.0.1:10808',
-                'https': 'socks5://127.0.0.1:10808'
-            },
+        config = get_common_ccxt_config()
+        config.update({
             'options': {
-                'defaultType': 'future',  # 期货交易
+                'defaultType': get_env_str('BINANCE_DEFAULT_TYPE', 'future'),
                 'adjustForTimeDifference': True,
-                'recvWindow': 60000,
+                'recvWindow': get_env_int('CCXT_RECV_WINDOW', 60000),
             },
-            'headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-            },
-            'verify': False,  # 禁用SSL证书验证
             'apiKey': API_KEY,
             'secret': API_SECRET
-        }
+        })
         
         try:
             exchange = ccxt.binance(config)
@@ -208,25 +199,16 @@ def initialize_exchange(exchange_name='binance'):
         if not API_KEY or not API_SECRET or not API_PASSPHRASE:
             raise ValueError("未能从.env文件中读取OKX API密钥，请检查OKX_API_KEY、OKX_API_SECRET和OKX_API_PASSPHRASE")
         
-        config = {
-            'enableRateLimit': True,
-            'timeout': 60000,
-            'proxies': {
-                'http': 'socks5://127.0.0.1:10808',
-                'https': 'socks5://127.0.0.1:10808'
-            },
+        config = get_common_ccxt_config()
+        config.update({
             'options': {
-                'defaultType': 'swap',  # 永续合约
+                'defaultType': get_env_str('OKX_DEFAULT_TYPE', 'swap'),
                 'adjustForTimeDifference': True,
             },
-            'headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-            },
-            'verify': False,  # 禁用SSL证书验证
             'apiKey': API_KEY,
             'secret': API_SECRET,
-            'password': API_PASSPHRASE  # OKX需要passphrase
-        }
+            'password': API_PASSPHRASE
+        })
         
         try:
             exchange = ccxt.okx(config)
@@ -760,16 +742,16 @@ def main():
     """主函数"""
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='获取交易所仓位历史数据')
-    parser.add_argument('--exchange', '-e', choices=['binance', 'okx'], default='binance',
-                        help='选择交易所 (默认: binance)')
+    parser.add_argument('--exchange', '-e', choices=['binance', 'okx'], default=POSITION_DEFAULTS['exchange'],
+                        help=f"选择交易所 (默认: {POSITION_DEFAULTS['exchange']})")
     parser.add_argument('--start-date', '-s', required=True,
                         help='开始日期 (格式: YYYY-MM-DD)')
     parser.add_argument('--end-date', '-n', required=True,
                         help='结束日期 (格式: YYYY-MM-DD)')
-    parser.add_argument('--threads', '-t', type=int, default=5,
-                        help='线程数量 (默认: 5)')
-    parser.add_argument('--max-retries', '-r', type=int, default=3,
-                        help='失败交易对的最大重试次数 (默认: 3)')
+    parser.add_argument('--threads', '-t', type=int, default=POSITION_DEFAULTS['threads'],
+                        help=f"线程数量 (默认: {POSITION_DEFAULTS['threads']})")
+    parser.add_argument('--max-retries', '-r', type=int, default=POSITION_DEFAULTS['max_retries'],
+                        help=f"失败交易对的最大重试次数 (默认: {POSITION_DEFAULTS['max_retries']})")
 
     args = parser.parse_args()
     

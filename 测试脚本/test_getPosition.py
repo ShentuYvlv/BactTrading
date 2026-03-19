@@ -17,6 +17,8 @@ from tqdm import tqdm
 import signal
 import csv
 
+from config import get_common_ccxt_config, get_env_int, get_env_str
+
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -138,26 +140,16 @@ def initialize_exchange():
     if not API_KEY or not API_SECRET:
         raise ValueError("未能从.env文件中读取API密钥，请检查BINANCE_API_KEY和BINANCE_API_SECRET")
     
-    # 使用和TEST_ca.py相同的成功连接配置
-    config = {
-        'enableRateLimit': True,
-        'timeout': 60000,
-        'proxies': {
-            'http': 'socks5://127.0.0.1:10808',
-            'https': 'socks5://127.0.0.1:10808'
-        },
+    config = get_common_ccxt_config()
+    config.update({
         'options': {
-            'defaultType': 'future',  # 期货交易
+            'defaultType': get_env_str('BINANCE_DEFAULT_TYPE', 'future'),
             'adjustForTimeDifference': True,
-            'recvWindow': 60000,
+            'recvWindow': get_env_int('CCXT_RECV_WINDOW', 60000),
         },
-        'headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        },
-        'verify': False,  # 禁用SSL证书验证
         'apiKey': API_KEY,
         'secret': API_SECRET
-    }
+    })
     
     try:
         exchange = ccxt.binance(config)
