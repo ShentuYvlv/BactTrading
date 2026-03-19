@@ -11,5 +11,4 @@ ccxt
 PySocks
 requests[socks]
 aiohttp-socks
-pandas-ta
 openpyxl

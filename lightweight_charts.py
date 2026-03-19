@@ -1249,8 +1249,8 @@ def create_app():
             <title>{%title%}</title>
             {%favicon%}
             {%css%}
-            <!-- 直接在HTML中加载TradingView Lightweight Charts库 -->
-            <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js" crossorigin="anonymous"></script>
+            <!-- 使用支持 panes 的 Lightweight Charts 5.x -->
+            <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js" crossorigin="anonymous"></script>
             <script>
                 // 检查库是否加载成功
                 window.addEventListener('DOMContentLoaded', function() {
@@ -1262,40 +1262,658 @@ def create_app():
                 });
 
                 // 定义客户端回调函数
+                function parseStorePayload(payload, fallbackValue) {
+                    if (payload === null || payload === undefined || payload === '') {
+                        return fallbackValue;
+                    }
+
+                    if (typeof payload === 'string') {
+                        try {
+                            return JSON.parse(payload);
+                        } catch (error) {
+                            console.error('解析存储数据失败:', error, payload);
+                            return fallbackValue;
+                        }
+                    }
+
+                    return payload;
+                }
+
+                function normalizeTimeValue(time) {
+                    if (time === null || time === undefined) {
+                        return null;
+                    }
+
+                    if (typeof time === 'number') {
+                        return time;
+                    }
+
+                    if (typeof time === 'object' && time.year && time.month && time.day) {
+                        return Math.floor(Date.UTC(time.year, time.month - 1, time.day) / 1000);
+                    }
+
+                    return null;
+                }
+
+                function formatLegendNumber(value, digits) {
+                    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                        return '--';
+                    }
+                    return Number(value).toFixed(digits || 2);
+                }
+
+                function formatLegendTime(time) {
+                    if (time === null || time === undefined) {
+                        return '--';
+                    }
+
+                    const timestamp = typeof time === 'number' ? time * 1000 : time;
+                    return new Date(timestamp).toLocaleString('zh-CN', {
+                        hour12: false,
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
+                }
+
+                function createDataIndex(data) {
+                    const index = new Map();
+                    (data || []).forEach(item => {
+                        index.set(item.time, item);
+                    });
+                    return index;
+                }
+
+                function resolvePointByTime(dataIndex, fallbackData, time) {
+                    if (time === null || time === undefined) {
+                        return null;
+                    }
+
+                    if (dataIndex && dataIndex.has(time)) {
+                        return dataIndex.get(time);
+                    }
+
+                    if (!fallbackData || fallbackData.length === 0) {
+                        return null;
+                    }
+
+                    for (let i = fallbackData.length - 1; i >= 0; i--) {
+                        if (fallbackData[i].time <= time) {
+                            return fallbackData[i];
+                        }
+                    }
+
+                    return fallbackData[0];
+                }
+
+                function buildVolumeData(chartData) {
+                    const candles = chartData.candlestick || [];
+                    const volumes = chartData.volume || [];
+
+                    return volumes.map((item, index) => {
+                        const candle = candles[index] || {};
+                        const isUp = Number(candle.close || 0) >= Number(candle.open || 0);
+                        return {
+                            time: item.time,
+                            value: Number(item.volume || item.value || 0),
+                            color: isUp ? 'rgba(38, 166, 154, 0.55)' : 'rgba(239, 83, 80, 0.55)',
+                        };
+                    });
+                }
+
+                function buildMacdHistogramData(histogramData) {
+                    let previous = null;
+                    return (histogramData || []).map(item => {
+                        const current = Number(item.value || 0);
+                        const isPositive = current >= 0;
+                        const color = isPositive
+                            ? (previous !== null && current < previous ? 'rgba(38, 166, 154, 0.45)' : 'rgba(38, 166, 154, 0.9)')
+                            : (previous !== null && current > previous ? 'rgba(239, 83, 80, 0.45)' : 'rgba(239, 83, 80, 0.9)');
+
+                        previous = current;
+                        return {
+                            time: item.time,
+                            value: current,
+                            color: color,
+                        };
+                    });
+                }
+
+                function getChartViewportHeights() {
+                    const isFullscreen = Boolean(document.fullscreenElement);
+                    const total = Math.max(window.innerHeight - (isFullscreen ? 24 : 170), isFullscreen ? 820 : 760);
+                    return {
+                        total: total,
+                        stage: total - 42,
+                    };
+                }
+
+                function applyChartShellDimensions(chartContainer, shellElement, stageWrapElement, stageElement, dimensions) {
+                    if (!chartContainer || !shellElement || !stageWrapElement || !stageElement) {
+                        return;
+                    }
+
+                    chartContainer.style.height = `${dimensions.total}px`;
+                    chartContainer.style.minHeight = `${dimensions.total}px`;
+                    chartContainer.style.maxHeight = `${dimensions.total}px`;
+
+                    shellElement.style.height = `${dimensions.total}px`;
+                    shellElement.style.minHeight = `${dimensions.total}px`;
+
+                    stageWrapElement.style.height = `${dimensions.stage}px`;
+                    stageElement.style.height = `${dimensions.stage}px`;
+                }
+
+                function applyPaneStretchFactors(chart, showRsi, showMacd) {
+                    if (!chart || typeof chart.panes !== 'function') {
+                        return;
+                    }
+
+                    const panes = chart.panes();
+                    if (!panes || panes.length === 0) {
+                        return;
+                    }
+
+                    let factors = [8, 2];
+                    if (showRsi && showMacd) {
+                        factors = [7, 2, 2, 3];
+                    } else if (showRsi || showMacd) {
+                        factors = [7, 2, 3];
+                    }
+
+                    panes.forEach((pane, index) => {
+                        if (pane && typeof pane.setStretchFactor === 'function' && factors[index] !== undefined) {
+                            pane.setStretchFactor(factors[index]);
+                        }
+                    });
+                }
+
+                function triggerDomClick(elementId) {
+                    const element = document.getElementById(elementId);
+                    if (!element) {
+                        return false;
+                    }
+                    element.click();
+                    return true;
+                }
+
+                function toggleCheckboxById(elementId) {
+                    const checkbox = document.getElementById(elementId);
+                    if (!checkbox) {
+                        return false;
+                    }
+                    checkbox.click();
+                    return true;
+                }
+
+                function goToLatestVisibleRange(chartState) {
+                    if (!chartState || !chartState.chart) {
+                        return;
+                    }
+
+                    const chart = chartState.chart;
+                    if (chart.timeScale && typeof chart.timeScale().scrollToRealTime === 'function') {
+                        chart.timeScale().scrollToRealTime();
+                        return;
+                    }
+
+                    const candles = chartState.chartData.candlestick || [];
+                    const lastCandle = candles[candles.length - 1];
+                    if (!lastCandle) {
+                        return;
+                    }
+
+                    const firstVisible = candles[Math.max(candles.length - 80, 0)];
+                    chart.timeScale().setVisibleRange({
+                        from: firstVisible.time,
+                        to: lastCandle.time,
+                    });
+                }
+
+                function closeChartContextMenu() {
+                    const menu = document.getElementById('tv-chart-context-menu');
+                    if (menu) {
+                        menu.classList.remove('open');
+                    }
+                }
+
+                function openChartContextMenu(x, y) {
+                    const menu = document.getElementById('tv-chart-context-menu');
+                    const stage = document.getElementById('tradingview-chart');
+                    if (!menu || !stage) {
+                        return;
+                    }
+
+                    const rect = stage.getBoundingClientRect();
+                    const maxLeft = Math.max(rect.width - 220, 16);
+                    const maxTop = Math.max(rect.height - 240, 16);
+                    const left = Math.min(Math.max(x - rect.left, 12), maxLeft);
+                    const top = Math.min(Math.max(y - rect.top, 12), maxTop);
+
+                    menu.style.left = `${left}px`;
+                    menu.style.top = `${top}px`;
+                    menu.classList.add('open');
+                }
+
+                function runChartAction(action, chartState) {
+                    if (!action) {
+                        return;
+                    }
+
+                    if (action === 'fit-content') {
+                        chartState?.chart?.timeScale().fitContent();
+                        return;
+                    }
+
+                    if (action === 'go-latest') {
+                        goToLatestVisibleRange(chartState);
+                        return;
+                    }
+
+                    if (action === 'fullscreen') {
+                        const container = document.getElementById('chart-container');
+                        if (!document.fullscreenElement && container?.requestFullscreen) {
+                            container.requestFullscreen();
+                        } else if (document.exitFullscreen) {
+                            document.exitFullscreen();
+                        }
+                        return;
+                    }
+
+                    if (action === 'toggle-ema') {
+                        toggleCheckboxById('show-ema-checkbox');
+                        return;
+                    }
+
+                    if (action === 'toggle-rsi') {
+                        toggleCheckboxById('show-rsi-checkbox');
+                        return;
+                    }
+
+                    if (action === 'toggle-macd') {
+                        toggleCheckboxById('show-macd-checkbox');
+                        return;
+                    }
+
+                    if (action === 'toggle-trades') {
+                        toggleCheckboxById('show-trades-checkbox');
+                    }
+                }
+
+                function bindChartInteractions(chartState) {
+                    if (!chartState) {
+                        return;
+                    }
+
+                    const cleanupFns = [];
+                    const stage = document.getElementById('tradingview-chart');
+                    const container = document.getElementById('chart-container');
+                    const shell = document.querySelector('.tv-chart-shell');
+                    const stageWrap = document.querySelector('.tv-chart-stage-wrap');
+                    const toolbar = document.getElementById('tv-chart-toolbar');
+                    const contextMenu = document.getElementById('tv-chart-context-menu');
+                    const chart = chartState.chart;
+
+                    const syncChartDimensions = () => {
+                        const dimensions = getChartViewportHeights();
+                        applyChartShellDimensions(container, shell, stageWrap, stage, dimensions);
+                        chart.applyOptions({
+                            width: stage.clientWidth,
+                            height: dimensions.stage,
+                        });
+                    };
+
+                    if (toolbar) {
+                        const onToolbarClick = (event) => {
+                            const button = event.target.closest('[data-action]');
+                            if (!button) {
+                                return;
+                            }
+                            runChartAction(button.dataset.action, chartState);
+                        };
+                        toolbar.addEventListener('click', onToolbarClick);
+                        cleanupFns.push(() => toolbar.removeEventListener('click', onToolbarClick));
+                    }
+
+                    if (contextMenu) {
+                        const onMenuClick = (event) => {
+                            const item = event.target.closest('[data-action]');
+                            if (!item) {
+                                return;
+                            }
+                            runChartAction(item.dataset.action, chartState);
+                            closeChartContextMenu();
+                        };
+                        contextMenu.addEventListener('click', onMenuClick);
+                        cleanupFns.push(() => contextMenu.removeEventListener('click', onMenuClick));
+                    }
+
+                    if (stage) {
+                        const onDblClick = () => chart.timeScale().fitContent();
+                        const onContextMenu = (event) => {
+                            event.preventDefault();
+                            openChartContextMenu(event.clientX, event.clientY);
+                        };
+
+                        stage.addEventListener('dblclick', onDblClick);
+                        stage.addEventListener('contextmenu', onContextMenu);
+
+                        cleanupFns.push(() => stage.removeEventListener('dblclick', onDblClick));
+                        cleanupFns.push(() => stage.removeEventListener('contextmenu', onContextMenu));
+                    }
+
+                    const onDocumentClick = (event) => {
+                        const menu = document.getElementById('tv-chart-context-menu');
+                        if (menu && !menu.contains(event.target)) {
+                            closeChartContextMenu();
+                        }
+                    };
+                    document.addEventListener('click', onDocumentClick);
+                    cleanupFns.push(() => document.removeEventListener('click', onDocumentClick));
+
+                    const onKeyDown = (event) => {
+                        const targetTag = (event.target?.tagName || '').toLowerCase();
+                        const isTyping = ['input', 'textarea', 'select'].includes(targetTag) || event.target?.isContentEditable;
+                        if (isTyping || event.metaKey || event.ctrlKey || event.altKey) {
+                            return;
+                        }
+
+                        const key = event.key.toLowerCase();
+                        const timeframeMap = {
+                            '1': 'timeframe-btn-1m',
+                            '2': 'timeframe-btn-5m',
+                            '3': 'timeframe-btn-15m',
+                            '4': 'timeframe-btn-30m',
+                            '5': 'timeframe-btn-1h',
+                            '6': 'timeframe-btn-4h',
+                            '7': 'timeframe-btn-8h',
+                            '8': 'timeframe-btn-1d',
+                            '9': 'timeframe-btn-1w',
+                        };
+
+                        if (timeframeMap[key]) {
+                            triggerDomClick(timeframeMap[key]);
+                            return;
+                        }
+
+                        if (key === 'f') {
+                            chart.timeScale().fitContent();
+                            return;
+                        }
+
+                        if (key === 'l') {
+                            goToLatestVisibleRange(chartState);
+                            return;
+                        }
+
+                        if (key === 'e') {
+                            toggleCheckboxById('show-ema-checkbox');
+                            return;
+                        }
+
+                        if (key === 'i') {
+                            toggleCheckboxById('show-rsi-checkbox');
+                            return;
+                        }
+
+                        if (key === 'm') {
+                            toggleCheckboxById('show-macd-checkbox');
+                            return;
+                        }
+
+                        if (key === 't') {
+                            toggleCheckboxById('show-trades-checkbox');
+                        }
+                    };
+
+                    window.addEventListener('keydown', onKeyDown);
+                    cleanupFns.push(() => window.removeEventListener('keydown', onKeyDown));
+
+                    window.addEventListener('resize', syncChartDimensions);
+                    document.addEventListener('fullscreenchange', syncChartDimensions);
+                    cleanupFns.push(() => window.removeEventListener('resize', syncChartDimensions));
+                    cleanupFns.push(() => document.removeEventListener('fullscreenchange', syncChartDimensions));
+
+                    chartState.cleanupFns = cleanupFns;
+                }
+
+                function setSeriesMarkersCompat(series, markers) {
+                    if (!series) {
+                        return null;
+                    }
+
+                    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+                        return LightweightCharts.createSeriesMarkers(series, markers || []);
+                    }
+
+                    if (typeof series.setMarkers === 'function') {
+                        series.setMarkers(markers || []);
+                    }
+
+                    return null;
+                }
+
+                function updatePositionInfoCard(position, index, total) {
+                    const element = document.getElementById('position-info');
+                    if (!element || !position) {
+                        return;
+                    }
+
+                    const profit = Number(position.profit || 0);
+                    const profitClass = profit >= 0 ? 'text-success' : 'text-danger';
+                    const sideLabel = position.side === 'long' ? '多头' : '空头';
+
+                    element.innerHTML = `
+                        <div>
+                            <div>
+                                <span class="small text-muted">仓位 </span>
+                                <span class="fw-bold">${index + 1}/${total}</span>
+                            </div>
+                            <div>
+                                <span class="fw-bold">${sideLabel} </span>
+                                <span class="small text-info d-block">${position.open_time_formatted || '--'}</span>
+                            </div>
+                            <div>
+                                <span class="small text-warning d-block">${position.close_time_formatted || '持仓中'}</span>
+                            </div>
+                            <div class="mt-1">
+                                <span class="small text-muted">盈亏: </span>
+                                <span class="${profitClass} fw-bold">${formatLegendNumber(profit, 2)}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                function renderLegend(chartState, hoveredTime, candlePoint) {
+                    if (!chartState) {
+                        return;
+                    }
+
+                    const legendElement = chartState.legendElement;
+                    const infoElement = chartState.infoElement;
+                    if (!legendElement && !infoElement) {
+                        return;
+                    }
+
+                    const lastCandle = (chartState.chartData.candlestick || []).slice(-1)[0];
+                    const effectiveTime = hoveredTime !== null && hoveredTime !== undefined
+                        ? hoveredTime
+                        : (lastCandle ? lastCandle.time : null);
+
+                    const candle = candlePoint
+                        || resolvePointByTime(chartState.indexes.candles, chartState.chartData.candlestick, effectiveTime)
+                        || lastCandle;
+
+                    if (!candle) {
+                        return;
+                    }
+
+                    const volume = resolvePointByTime(chartState.indexes.volume, chartState.chartData.volume, candle.time);
+                    const ema = resolvePointByTime(chartState.indexes.ema, chartState.chartData.ema20, candle.time);
+                    const upperBand = resolvePointByTime(chartState.indexes.upper, chartState.chartData.upper_band, candle.time);
+                    const middleBand = resolvePointByTime(chartState.indexes.middle, chartState.chartData.middle_band, candle.time);
+                    const lowerBand = resolvePointByTime(chartState.indexes.lower, chartState.chartData.lower_band, candle.time);
+                    const rsi = resolvePointByTime(chartState.indexes.rsi, chartState.chartData.rsi, candle.time);
+                    const macd = resolvePointByTime(chartState.indexes.macd, chartState.chartData.macd, candle.time);
+                    const signal = resolvePointByTime(chartState.indexes.signal, chartState.chartData.signal, candle.time);
+                    const histogram = resolvePointByTime(chartState.indexes.histogram, chartState.chartData.histogram, candle.time);
+                    const delta = Number(candle.close || 0) - Number(candle.open || 0);
+                    const deltaClass = delta >= 0 ? 'is-up' : 'is-down';
+                    const volumeValue = volume ? (volume.volume !== undefined ? volume.volume : volume.value) : null;
+
+                    const legendHtml = `
+                        <div class="tv-legend-row">
+                            <span class="tv-legend-chip">${formatLegendTime(candle.time)}</span>
+                            <span class="tv-legend-chip ${deltaClass}">O ${formatLegendNumber(candle.open, 4)}</span>
+                            <span class="tv-legend-chip">H ${formatLegendNumber(candle.high, 4)}</span>
+                            <span class="tv-legend-chip">L ${formatLegendNumber(candle.low, 4)}</span>
+                            <span class="tv-legend-chip ${deltaClass}">C ${formatLegendNumber(candle.close, 4)}</span>
+                            <span class="tv-legend-chip">V ${formatLegendNumber(volumeValue, 2)}</span>
+                        </div>
+                        <div class="tv-legend-row">
+                            <span class="tv-legend-chip accent-blue">EMA20 ${formatLegendNumber(ema ? ema.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-violet">BOLL U ${formatLegendNumber(upperBand ? upperBand.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-slate">MID ${formatLegendNumber(middleBand ? middleBand.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-gold">LOW ${formatLegendNumber(lowerBand ? lowerBand.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-mint">RSI ${formatLegendNumber(rsi ? rsi.value : null, 2)}</span>
+                            <span class="tv-legend-chip accent-orange">MACD ${formatLegendNumber(macd ? macd.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-red">SIG ${formatLegendNumber(signal ? signal.value : null, 4)}</span>
+                            <span class="tv-legend-chip accent-sky">HIST ${formatLegendNumber(histogram ? histogram.value : null, 4)}</span>
+                        </div>
+                    `;
+
+                    if (legendElement) {
+                        legendElement.innerHTML = legendHtml;
+                    }
+
+                    if (infoElement) {
+                        infoElement.innerHTML = `
+                            <div class="tv-summary-row">
+                                <span>时间 ${formatLegendTime(candle.time)}</span>
+                                <span>开 ${formatLegendNumber(candle.open, 4)}</span>
+                                <span>高 ${formatLegendNumber(candle.high, 4)}</span>
+                                <span>低 ${formatLegendNumber(candle.low, 4)}</span>
+                                <span>收 ${formatLegendNumber(candle.close, 4)}</span>
+                                <span>量 ${formatLegendNumber(volumeValue, 2)}</span>
+                                <span>RSI ${formatLegendNumber(rsi ? rsi.value : null, 2)}</span>
+                                <span>MACD ${formatLegendNumber(macd ? macd.value : null, 4)}</span>
+                            </div>
+                        `;
+                    }
+                }
+
+                function focusPositionOnChart(targetIndex, positionsPayload) {
+                    const positions = parseStorePayload(positionsPayload, []);
+                    const chartState = window.tvChartState;
+
+                    if (!chartState || !chartState.chart || !positions || positions.length === 0) {
+                        return;
+                    }
+
+                    const safeIndex = ((targetIndex % positions.length) + positions.length) % positions.length;
+                    const position = positions[safeIndex];
+                    const firstCandle = (chartState.chartData.candlestick || [])[0];
+                    const lastCandle = (chartState.chartData.candlestick || []).slice(-1)[0];
+                    if (!firstCandle || !lastCandle) {
+                        return;
+                    }
+
+                    const openTime = Number(position.open_time || firstCandle.time);
+                    const closeTime = Number(position.close_time || openTime);
+                    const positionSpan = Math.max(closeTime - openTime, 60 * 60);
+                    const padding = Math.max(Math.round(positionSpan * 0.75), 30 * 60);
+
+                    chartState.currentPositionIndex = safeIndex;
+                    chartState.chart.timeScale().setVisibleRange({
+                        from: Math.max(firstCandle.time, openTime - padding),
+                        to: Math.min(lastCandle.time, closeTime + padding),
+                    });
+
+                    updatePositionInfoCard(position, safeIndex, positions.length);
+                }
+
                 window.dash_clientside = Object.assign({}, window.dash_clientside, {
                     clientside: {
                         initializeChart: function(chartData, tradesData, showEma, showTrades, showBollinger, showRsi, showMacd) {
+                            const parsedChartData = parseStorePayload(chartData, {});
+                            const parsedTradesData = parseStorePayload(tradesData, []);
+                            const chartContainer = document.getElementById('chart-container');
+                            const dimensions = getChartViewportHeights();
+                            const targetHeight = dimensions.total;
+                            const stageHeight = dimensions.stage;
+
                             console.log('🔄 initializeChart 被调用', {
-                                chartDataLength: chartData ? chartData.length : 0,
-                                tradesDataLength: tradesData ? tradesData.length : 0,
+                                chartDataLength: parsedChartData && parsedChartData.candlestick ? parsedChartData.candlestick.length : 0,
+                                tradesDataLength: parsedTradesData ? parsedTradesData.length : 0,
                                 showEma, showTrades, showBollinger, showRsi, showMacd
                             });
 
                             // 创建图表容器HTML
                             const chartHtml = `
-                                <div id="tradingview-chart" style="
-                                    width: 100%;
-                                    height: 600px;
-                                    background-color: #1c2030;
-                                    border: 1px solid #2B2B43;
-                                    border-radius: 8px;
-                                    position: relative;
-                                "></div>
+                                <div class="tv-chart-shell" style="height:${targetHeight}px; min-height:${targetHeight}px;">
+                                    <div class="tv-chart-header">
+                                        <div class="tv-chart-badge">Pro Chart</div>
+                                        <div class="tv-chart-toolbar" id="tv-chart-toolbar">
+                                            <button type="button" class="tv-toolbar-btn" data-action="fit-content" title="双击图表也可复位">适应</button>
+                                            <button type="button" class="tv-toolbar-btn" data-action="go-latest" title="定位到最新K线">最新</button>
+                                            <button type="button" class="tv-toolbar-btn" data-action="fullscreen" title="全屏查看图表">全屏</button>
+                                        </div>
+                                        <div class="tv-chart-caption">右键菜单 / 双击复位 / 快捷键 1-9 切周期，F 适应，L 最新，E/I/M/T 切指标</div>
+                                    </div>
+                                    <div class="tv-chart-stage-wrap" style="height:${stageHeight}px;">
+                                        <div id="tv-chart-legend" class="tv-chart-legend"></div>
+                                        <div id="tradingview-chart" class="tv-chart-stage" style="height:${stageHeight}px;"></div>
+                                        <div id="tv-chart-context-menu" class="tv-chart-context-menu">
+                                            <button type="button" class="tv-context-item" data-action="fit-content">适应全部</button>
+                                            <button type="button" class="tv-context-item" data-action="go-latest">跳到最新</button>
+                                            <button type="button" class="tv-context-item" data-action="fullscreen">切换全屏</button>
+                                            <div class="tv-context-divider"></div>
+                                            <button type="button" class="tv-context-item" data-action="toggle-trades">切换交易标记</button>
+                                            <button type="button" class="tv-context-item" data-action="toggle-ema">切换 EMA20</button>
+                                            <button type="button" class="tv-context-item" data-action="toggle-rsi">切换 RSI</button>
+                                            <button type="button" class="tv-context-item" data-action="toggle-macd">切换 MACD</button>
+                                        </div>
+                                    </div>
+                                </div>
                             `;
+
+                            if (!chartContainer) {
+                                return window.dash_clientside.no_update;
+                            }
+
+                            chartContainer.style.height = `${targetHeight}px`;
+                            chartContainer.style.minHeight = `${targetHeight}px`;
+                            chartContainer.style.maxHeight = `${targetHeight}px`;
+                            chartContainer.innerHTML = chartHtml;
 
                             // 使用setTimeout确保DOM更新后再初始化图表
                             setTimeout(function() {
                                 const chartElement = document.getElementById('tradingview-chart');
-                                if (chartElement && typeof LightweightCharts !== 'undefined') {
+                                const legendElement = document.getElementById('tv-chart-legend');
+                                const infoElement = document.getElementById('chart-info');
+                                const currentContainer = document.getElementById('chart-container');
+                                if (chartElement && currentContainer && typeof LightweightCharts !== 'undefined') {
                                     console.log('📊 开始创建图表...');
 
-                                    // 清除之前的图表
-                                    if (chartElement._chart) {
-                                        chartElement._chart.remove();
+                                    if (window.tvChartState && Array.isArray(window.tvChartState.cleanupFns)) {
+                                        window.tvChartState.cleanupFns.forEach(fn => {
+                                            try { fn(); } catch (error) { console.warn('清理图表事件失败', error); }
+                                        });
+                                    }
+
+                                    if (window.tvChartState && window.tvChartState.resizeObserver) {
+                                        window.tvChartState.resizeObserver.disconnect();
+                                    }
+
+                                    if (window.tvChartState && window.tvChartState.chart) {
+                                        window.tvChartState.chart.remove();
+                                        window.tvChartState = null;
                                     }
 
                                     // 如果没有数据，显示提示信息
-                                    if (!chartData || chartData.length === 0) {
+                                    if (!parsedChartData || !parsedChartData.candlestick || parsedChartData.candlestick.length === 0) {
                                         chartElement.innerHTML = `
                                             <div style="
                                                 width: 100%;
@@ -1307,69 +1925,266 @@ def create_app():
                                                 font-size: 16px;
                                             ">暂无图表数据</div>
                                         `;
+                                        if (legendElement) {
+                                            legendElement.innerHTML = '<span class="tv-legend-chip">暂无图表数据</span>';
+                                        }
+                                        if (infoElement) {
+                                            infoElement.innerHTML = '<div class="tv-summary-row">请先加载数据</div>';
+                                        }
                                         return;
                                     }
 
-                                    // 创建新图表
+                                    const chartHeight = stageHeight;
                                     const chart = LightweightCharts.createChart(chartElement, {
                                         width: chartElement.clientWidth,
-                                        height: 600,
+                                        height: chartHeight,
                                         layout: {
-                                            background: { color: '#1c2030' },
+                                            background: { color: '#131722' },
                                             textColor: '#d1d4dc',
+                                            panes: {
+                                                separatorColor: '#273041',
+                                                separatorHoverColor: 'rgba(41, 98, 255, 0.45)',
+                                                enableResize: true,
+                                            },
                                         },
                                         grid: {
-                                            vertLines: { color: '#2B2B43' },
-                                            horzLines: { color: '#2B2B43' },
+                                            vertLines: { color: 'rgba(42, 46, 57, 0.55)' },
+                                            horzLines: { color: 'rgba(42, 46, 57, 0.55)' },
                                         },
                                         crosshair: {
                                             mode: LightweightCharts.CrosshairMode.Normal,
+                                            vertLine: {
+                                                color: 'rgba(117, 134, 150, 0.55)',
+                                                labelBackgroundColor: '#2962ff',
+                                            },
+                                            horzLine: {
+                                                color: 'rgba(117, 134, 150, 0.55)',
+                                                labelBackgroundColor: '#2962ff',
+                                            },
                                         },
                                         rightPriceScale: {
                                             borderColor: '#2B2B43',
+                                            scaleMargins: {
+                                                top: 0.08,
+                                                bottom: 0.1,
+                                            },
                                         },
                                         timeScale: {
                                             borderColor: '#2B2B43',
                                             timeVisible: true,
                                             secondsVisible: false,
+                                            rightOffset: 8,
+                                            barSpacing: 11,
+                                            minBarSpacing: 5,
+                                        },
+                                        handleScroll: {
+                                            mouseWheel: true,
+                                            pressedMouseMove: true,
+                                            horzTouchDrag: true,
+                                            vertTouchDrag: false,
+                                        },
+                                        handleScale: {
+                                            axisPressedMouseMove: {
+                                                time: true,
+                                                price: true,
+                                            },
+                                            mouseWheel: true,
+                                            pinch: true,
+                                            axisDoubleClickReset: true,
                                         },
                                     });
 
-                                    // 添加K线数据
-                                    const candlestickSeries = chart.addCandlestickSeries({
+                                    const candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
                                         upColor: '#26a69a',
                                         downColor: '#ef5350',
                                         borderVisible: false,
                                         wickUpColor: '#26a69a',
                                         wickDownColor: '#ef5350',
-                                    });
+                                        priceLineVisible: true,
+                                        lastValueVisible: true,
+                                    }, 0);
 
-                                    console.log('📈 设置K线数据，数据量:', chartData.length);
-                                    candlestickSeries.setData(chartData);
+                                    candlestickSeries.setData(parsedChartData.candlestick || []);
+
+                                    const volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+                                        priceFormat: {
+                                            type: 'volume',
+                                        },
+                                        priceLineVisible: false,
+                                        lastValueVisible: false,
+                                    }, 1);
+                                    volumeSeries.setData(buildVolumeData(parsedChartData));
+
+                                    let nextPaneIndex = 2;
+
+                                    if (showEma) {
+                                        const emaSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: '#4da3ff',
+                                            lineWidth: 2,
+                                            lastValueVisible: false,
+                                            priceLineVisible: false,
+                                        }, 0);
+                                        emaSeries.setData(parsedChartData.ema20 || []);
+                                    }
+
+                                    if (showBollinger) {
+                                        const upperBandSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: 'rgba(180, 162, 255, 0.9)',
+                                            lineWidth: 1,
+                                            lastValueVisible: false,
+                                            priceLineVisible: false,
+                                        }, 0);
+                                        const middleBandSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: 'rgba(150, 163, 184, 0.85)',
+                                            lineWidth: 1,
+                                            lineStyle: LightweightCharts.LineStyle.Dashed,
+                                            lastValueVisible: false,
+                                            priceLineVisible: false,
+                                        }, 0);
+                                        const lowerBandSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: 'rgba(255, 196, 88, 0.85)',
+                                            lineWidth: 1,
+                                            lastValueVisible: false,
+                                            priceLineVisible: false,
+                                        }, 0);
+
+                                        upperBandSeries.setData(parsedChartData.upper_band || []);
+                                        middleBandSeries.setData(parsedChartData.middle_band || []);
+                                        lowerBandSeries.setData(parsedChartData.lower_band || []);
+                                    }
+
+                                    if (showRsi) {
+                                        const rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: '#22c55e',
+                                            lineWidth: 2,
+                                            lastValueVisible: true,
+                                            priceLineVisible: false,
+                                        }, nextPaneIndex);
+                                        rsiSeries.setData(parsedChartData.rsi || []);
+                                        rsiSeries.createPriceLine({
+                                            price: 70,
+                                            color: 'rgba(239, 83, 80, 0.55)',
+                                            lineWidth: 1,
+                                            lineStyle: LightweightCharts.LineStyle.Dashed,
+                                            axisLabelVisible: true,
+                                            title: 'RSI 70',
+                                        });
+                                        rsiSeries.createPriceLine({
+                                            price: 30,
+                                            color: 'rgba(38, 166, 154, 0.55)',
+                                            lineWidth: 1,
+                                            lineStyle: LightweightCharts.LineStyle.Dashed,
+                                            axisLabelVisible: true,
+                                            title: 'RSI 30',
+                                        });
+                                        nextPaneIndex += 1;
+                                    }
+
+                                    if (showMacd) {
+                                        const macdPaneIndex = nextPaneIndex;
+                                        const macdHistogramSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+                                            priceLineVisible: false,
+                                            lastValueVisible: false,
+                                        }, macdPaneIndex);
+                                        const macdSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: '#f97316',
+                                            lineWidth: 2,
+                                            lastValueVisible: true,
+                                            priceLineVisible: false,
+                                        }, macdPaneIndex);
+                                        const macdSignalSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                                            color: '#ef4444',
+                                            lineWidth: 2,
+                                            lastValueVisible: true,
+                                            priceLineVisible: false,
+                                        }, macdPaneIndex);
+
+                                        macdHistogramSeries.setData(buildMacdHistogramData(parsedChartData.histogram || []));
+                                        macdSeries.setData(parsedChartData.macd || []);
+                                        macdSignalSeries.setData(parsedChartData.signal || []);
+                                        nextPaneIndex += 1;
+                                    }
 
                                     // 添加交易标记
-                                    if (showTrades && tradesData && tradesData.length > 0) {
-                                        console.log('🎯 添加交易标记，标记数量:', tradesData.length);
-                                        const markers = tradesData.map(trade => ({
+                                    let markerApi = null;
+                                    if (showTrades && parsedTradesData && parsedTradesData.length > 0) {
+                                        const markers = parsedTradesData.map(trade => ({
                                             time: trade.open_time,
                                             position: trade.side === 'long' ? 'belowBar' : 'aboveBar',
                                             color: trade.side === 'long' ? '#26a69a' : '#ef5350',
                                             shape: trade.side === 'long' ? 'arrowUp' : 'arrowDown',
-                                            text: `${trade.side.toUpperCase()} @${trade.open_price}`
+                                            text: `${trade.side === 'long' ? 'LONG' : 'SHORT'} @${formatLegendNumber(trade.open_price, 4)}`
                                         }));
-                                        candlestickSeries.setMarkers(markers);
+                                        markerApi = setSeriesMarkersCompat(candlestickSeries, markers);
                                     }
 
-                                    // 响应式调整
-                                    const resizeObserver = new ResizeObserver(entries => {
-                                        if (entries.length === 0 || entries[0].target !== chartElement) return;
-                                        const newRect = entries[0].contentRect;
-                                        chart.applyOptions({ width: newRect.width });
-                                    });
-                                    resizeObserver.observe(chartElement);
+                                    const chartState = {
+                                        chart: chart,
+                                        candlestickSeries: candlestickSeries,
+                                        volumeSeries: volumeSeries,
+                                        markerApi: markerApi,
+                                        chartData: parsedChartData,
+                                        tradesData: parsedTradesData,
+                                        currentPositionIndex: 0,
+                                        legendElement: legendElement,
+                                        infoElement: infoElement,
+                                        indexes: {
+                                            candles: createDataIndex(parsedChartData.candlestick),
+                                            volume: createDataIndex(parsedChartData.volume),
+                                            ema: createDataIndex(parsedChartData.ema20),
+                                            upper: createDataIndex(parsedChartData.upper_band),
+                                            middle: createDataIndex(parsedChartData.middle_band),
+                                            lower: createDataIndex(parsedChartData.lower_band),
+                                            rsi: createDataIndex(parsedChartData.rsi),
+                                            macd: createDataIndex(parsedChartData.macd),
+                                            signal: createDataIndex(parsedChartData.signal),
+                                            histogram: createDataIndex(parsedChartData.histogram),
+                                        },
+                                    };
 
-                                    // 存储图表实例
-                                    chartElement._chart = chart;
+                                    chart.subscribeCrosshairMove(function(param) {
+                                        const hoveredTime = normalizeTimeValue(param.time);
+                                        const candleData = param.seriesData && candlestickSeries
+                                            ? param.seriesData.get(candlestickSeries)
+                                            : null;
+
+                                        if (hoveredTime === null || hoveredTime === undefined) {
+                                            renderLegend(chartState, null, null);
+                                            return;
+                                        }
+
+                                        renderLegend(chartState, hoveredTime, candleData || null);
+                                    });
+
+                                    chart.subscribeClick(function(param) {
+                                        if (!param || !param.point) {
+                                            return;
+                                        }
+
+                                        const hoveredTime = normalizeTimeValue(param.time);
+                                        renderLegend(chartState, hoveredTime, null);
+                                    });
+
+                                    chart.timeScale().fitContent();
+
+                                    applyPaneStretchFactors(chart, showRsi, showMacd);
+                                    renderLegend(chartState, null, null);
+                                    updatePositionInfoCard(parsedTradesData[0], 0, parsedTradesData.length);
+
+                                    const resizeObserver = new ResizeObserver(entries => {
+                                        if (entries.length === 0 || entries[0].target !== currentContainer) return;
+                                        const newRect = entries[0].contentRect;
+                                        chart.applyOptions({
+                                            width: newRect.width,
+                                            height: chartHeight,
+                                        });
+                                    });
+                                    resizeObserver.observe(currentContainer);
+
+                                    chartState.resizeObserver = resizeObserver;
+                                    window.tvChartState = chartState;
+                                    window.priceChart = chart;
+                                    bindChartInteractions(chartState);
 
                                     console.log('✅ 图表创建完成');
                                 } else {
@@ -1377,7 +2192,45 @@ def create_app():
                                 }
                             }, 100);
 
-                            return chartHtml;
+                            return window.dash_clientside.no_update;
+                        },
+
+                        navigateToPosition: function(prevClicks, nextClicks, positionsPayload) {
+                            const ctx = window.dash_clientside && window.dash_clientside.callback_context
+                                ? window.dash_clientside.callback_context
+                                : null;
+                            const triggeredId = ctx && ctx.triggered && ctx.triggered[0]
+                                ? ctx.triggered[0].prop_id.split('.')[0]
+                                : null;
+
+                            const positions = parseStorePayload(positionsPayload, []);
+                            if (!positions || positions.length === 0 || !window.tvChartState) {
+                                return window.dash_clientside.no_update;
+                            }
+
+                            const currentIndex = window.tvChartState.currentPositionIndex || 0;
+                            const nextIndex = triggeredId === 'prev-position-button'
+                                ? currentIndex - 1
+                                : currentIndex + 1;
+
+                            focusPositionOnChart(nextIndex, positions);
+                            return window.dash_clientside.no_update;
+                        },
+
+                        jumpToPositionByNumber: function(nClicks, positionNumber, positionsPayload) {
+                            if (!nClicks) {
+                                return window.dash_clientside.no_update;
+                            }
+
+                            const positions = parseStorePayload(positionsPayload, []);
+                            const targetIndex = Number(positionNumber || 1) - 1;
+
+                            if (!positions || positions.length === 0 || Number.isNaN(targetIndex)) {
+                                return window.dash_clientside.no_update;
+                            }
+
+                            focusPositionOnChart(targetIndex, positions);
+                            return window.dash_clientside.no_update;
                         }
                     }
                 });
@@ -1684,6 +2537,206 @@ def create_app():
                     overflow: hidden;
                     background-color: #131722;
                     transition: all 0.3s ease;
+                    min-height: 760px;
+                }
+
+                .tv-chart-shell {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100%;
+                    min-height: 760px;
+                }
+
+                .tv-chart-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    padding: 10px 14px 6px;
+                    border-bottom: 1px solid rgba(43, 43, 67, 0.65);
+                    background: linear-gradient(180deg, rgba(18, 23, 34, 0.92), rgba(18, 23, 34, 0.55));
+                }
+
+                .tv-chart-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 4px 10px;
+                    border-radius: 999px;
+                    background: rgba(41, 98, 255, 0.14);
+                    color: #86b2ff;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                }
+
+                .tv-chart-caption {
+                    color: #7f8ea3;
+                    font-size: 12px;
+                    text-align: right;
+                    margin-left: auto;
+                }
+
+                .tv-chart-toolbar {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+
+                .tv-toolbar-btn {
+                    border: 1px solid rgba(67, 80, 102, 0.85);
+                    background: rgba(16, 22, 34, 0.85);
+                    color: #dbe2ea;
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                    font-size: 12px;
+                    line-height: 1;
+                    transition: all 0.2s ease;
+                }
+
+                .tv-toolbar-btn:hover {
+                    border-color: rgba(88, 112, 255, 0.85);
+                    color: #ffffff;
+                    background: rgba(30, 41, 69, 0.95);
+                }
+
+                .tv-toolbar-btn:active {
+                    transform: translateY(1px);
+                }
+
+                .tv-chart-stage-wrap {
+                    position: relative;
+                    flex: 1;
+                    min-height: 0;
+                }
+
+                .tv-chart-stage {
+                    width: 100%;
+                    height: 100%;
+                    min-height: 720px;
+                }
+
+                .tv-chart-legend {
+                    position: absolute;
+                    top: 12px;
+                    left: 12px;
+                    z-index: 6;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    pointer-events: none;
+                    max-width: calc(100% - 24px);
+                }
+
+                .tv-chart-context-menu {
+                    position: absolute;
+                    z-index: 12;
+                    min-width: 180px;
+                    padding: 8px;
+                    display: none;
+                    flex-direction: column;
+                    gap: 4px;
+                    border-radius: 12px;
+                    background: rgba(10, 14, 23, 0.96);
+                    border: 1px solid rgba(57, 67, 84, 0.95);
+                    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+                    backdrop-filter: blur(12px);
+                }
+
+                .tv-chart-context-menu.open {
+                    display: flex;
+                }
+
+                .tv-context-item {
+                    border: 0;
+                    background: transparent;
+                    color: #d8e0ea;
+                    text-align: left;
+                    border-radius: 8px;
+                    padding: 8px 10px;
+                    font-size: 12px;
+                    transition: background 0.16s ease;
+                }
+
+                .tv-context-item:hover {
+                    background: rgba(41, 98, 255, 0.16);
+                }
+
+                .tv-context-divider {
+                    height: 1px;
+                    background: rgba(57, 67, 84, 0.8);
+                    margin: 4px 0;
+                }
+
+                .tv-legend-row {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 6px;
+                }
+
+                .tv-legend-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 4px 8px;
+                    border-radius: 999px;
+                    background: rgba(10, 14, 23, 0.82);
+                    border: 1px solid rgba(57, 67, 84, 0.8);
+                    color: #d1d4dc;
+                    font-size: 11px;
+                    line-height: 1;
+                    backdrop-filter: blur(8px);
+                }
+
+                .tv-legend-chip.is-up {
+                    color: #34d399;
+                }
+
+                .tv-legend-chip.is-down {
+                    color: #f87171;
+                }
+
+                .tv-legend-chip.accent-blue {
+                    color: #60a5fa;
+                }
+
+                .tv-legend-chip.accent-violet {
+                    color: #c4b5fd;
+                }
+
+                .tv-legend-chip.accent-slate {
+                    color: #cbd5e1;
+                }
+
+                .tv-legend-chip.accent-gold {
+                    color: #fbbf24;
+                }
+
+                .tv-legend-chip.accent-mint {
+                    color: #4ade80;
+                }
+
+                .tv-legend-chip.accent-orange {
+                    color: #fb923c;
+                }
+
+                .tv-legend-chip.accent-red {
+                    color: #f87171;
+                }
+
+                .tv-legend-chip.accent-sky {
+                    color: #38bdf8;
+                }
+
+                .tv-summary-row {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    padding: 10px 12px 4px;
+                    color: #aeb6c2;
+                    font-size: 12px;
+                    border-top: 1px solid rgba(43, 43, 67, 0.5);
+                    background: linear-gradient(180deg, rgba(19, 23, 34, 0.15), rgba(19, 23, 34, 0.6));
                 }
                 
                 /* 状态信息样式 */
@@ -1909,10 +2962,10 @@ def create_app():
                 
                 /* 调整图表容器样式 */
                 .chart-wrapper {
-                    height: calc(100vh - 60px);  /* 进一步减少顶部和底部间距 */
-                    min-height: 900px;  /* 进一步增加最小高度 */
+                    height: calc(100vh - 60px);
+                    min-height: 820px;
                 }
-                
+
                 #chart-container {
                     height: 100% !important;
                 }
@@ -1993,6 +3046,21 @@ def create_app():
                     #navigation-controller {
                         width: 150px;
                     }
+
+                    .tv-chart-header {
+                        flex-direction: column;
+                        align-items: flex-start;
+                    }
+
+                    .tv-chart-caption {
+                        text-align: left;
+                        margin-left: 0;
+                    }
+
+                    .tv-chart-toolbar {
+                        order: 3;
+                        width: 100%;
+                    }
                 }
 
                 /* 时间周期按钮样式 */
@@ -2021,6 +3089,22 @@ def create_app():
                         min-width: 40px;
                         font-size: 0.75rem;
                         padding: 0.25rem 0.5rem;
+                    }
+
+                    .chart-wrapper {
+                        min-height: 720px;
+                    }
+
+                    .tv-chart-shell {
+                        min-height: 680px;
+                    }
+
+                    .tv-chart-stage {
+                        min-height: 640px;
+                    }
+
+                    .tv-legend-chip {
+                        font-size: 10px;
                     }
                 }
             </style>
