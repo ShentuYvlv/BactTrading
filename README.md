@@ -1,71 +1,148 @@
-# 币安交易复盘工具
+# BactTrading
 
-这个项目使用 CCXT 拉取交易所数据，生成仓位历史 CSV，并通过 Dash 图表页面进行交易复盘。
+本项目已经完成从单文件 Dash 页到前后端分离架构的重构：
+
+- 后端：FastAPI
+- 前端：React + Vite + Tailwind CSS
+- 图表：Lightweight Charts 5.x
+
+当前定位是本机单机复盘工作台，后续可以直接部署到服务器。
+
+## 目录结构
+
+```text
+backend/     FastAPI API、图表服务、CSV/缓存/交易所逻辑
+frontend/    React 前端工作台
+data/        仓位历史 CSV
+cache/       OHLCV 缓存
+getPosition.py  仓位重建 CLI
+start_server.py 后端启动入口
+```
 
 ## 功能
 
-- 从币安API获取交易历史
-- 在价格图表上标注买入和卖出点
-- 可视化展示交易盈亏
-- 支持不同时间周期的查看
-- 为后期与Backtrader量化框架的集成做准备
+- 列出 `data/` 目录下的 CSV，并按最新文件优先加载
+- 从 CSV 读取交易对、交易次数和仓位记录
+- 从交易所获取 K 线并缓存到 `cache/`
+- 指标支持：`EMA20`、`布林带`、`RSI`、`MACD`、`成交量`
+- 图表支持：多 pane、十字线 legend、工具条、快捷键、右键菜单、仓位聚焦
+- 仓位导航支持：上一笔、下一笔、序号跳转、仓位信息卡
+- 保留仓位重建 CLI：支持 `binance` / `okx`
 
 ## 安装
 
-1. 安装依赖：
-   ```
-   pip install -r requirements.txt
-   ```
+### 1. Python 依赖
 
-2. 复制环境变量模板并填写：
-   ```
-   cp .env.example .env
-   ```
-
-3. 按需要配置 `.env`：
-   ```
-   BINANCE_API_KEY=您的API密钥
-   BINANCE_API_SECRET=您的API密钥Secret
-   EXCHANGE_PROXY_URL=socks5://127.0.0.1:10808
-   APP_PORT=8051
-   CHART_DEFAULT_SYMBOL=BTC/USDT:USDT
-   ```
-
-## 使用方法
-
-### 1. 抓取仓位历史到 CSV
-
-```
-python getPosition.py -e binance -s 2025-07-18 -n 2025-08-02
+```bash
+pip install -r requirements.txt
 ```
 
-生成的数据会保存在 `data/` 目录。
+### 2. 前端依赖
 
-### 2. 启动图表页面
-
+```bash
+cd frontend
+npm install
+cd ..
 ```
+
+### 3. 环境变量
+
+```bash
+cp .env.example .env
+```
+
+常用项：
+
+```env
+EXCHANGE_PROXY_URL=
+APP_HOST=0.0.0.0
+APP_PORT=8051
+APP_USE_RELOADER=false
+
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+OKX_API_KEY=
+OKX_API_SECRET=
+OKX_API_PASSPHRASE=
+
+CHART_DEFAULT_SYMBOL=NXPC/USDT:USDT
+CHART_DEFAULT_TIMEFRAME=1h
+CHART_DEFAULT_START_DATE=2025-07-18
+CHART_DEFAULT_END_DATE=2025-08-02
+
+POSITION_DEFAULT_EXCHANGE=binance
+POSITION_DEFAULT_THREADS=5
+POSITION_MAX_RETRIES=3
+```
+
+如果你只想看本地 CSV，API Key 可以先留空。
+
+## 启动
+
+### 1. 构建前端
+
+首次启动或前端代码有变动后，先执行：
+
+```bash
+cd frontend
+npm run build
+cd ..
+```
+
+### 2. 启动服务
+
+```bash
 python start_server.py
 ```
 
-打开浏览器访问：
+打开：
 
-```
+```text
 http://127.0.0.1:8051
 ```
 
-页面会默认读取 `data/` 中最新的 CSV 文件，你也可以在界面中切换数据文件、交易对、时间周期和日期范围。
+FastAPI 会直接托管 `frontend/dist`，不再依赖旧的 Dash 页面。
 
-### 3. 可选配置
+## 开发模式
 
-以下运行参数已经改为从 `.env` 读取：
+前端开发：
 
-- 代理：`EXCHANGE_PROXY_URL`
-- 服务端口与调试：`APP_HOST`、`APP_PORT`、`APP_DEBUG`、`APP_USE_RELOADER`
-- 图表默认值：`CHART_DEFAULT_SYMBOL`、`CHART_DEFAULT_TIMEFRAME`、`CHART_DEFAULT_START_DATE`、`CHART_DEFAULT_END_DATE`
-- 抓取默认值：`POSITION_DEFAULT_EXCHANGE`、`POSITION_DEFAULT_THREADS`、`POSITION_MAX_RETRIES`
+```bash
+cd frontend
+npm run dev
+```
 
-## 注意事项
+后端开发：
 
-- 请确保 API 密钥仅授予只读权限
-- 如果不需要代理，请将 `EXCHANGE_PROXY_URL` 留空
-- 该工具仅用于交易复盘和分析，不提供自动交易功能
+```bash
+python start_server.py
+```
+
+Vite 已代理 `/api` 到 `http://127.0.0.1:8051`。
+
+## 仓位重建
+
+CLI 入口仍保留：
+
+```bash
+python getPosition.py -e binance -s 2025-07-18 -n 2025-08-02
+```
+
+也可以在新页面左侧“重建仓位”面板直接触发。
+
+生成的数据会写入 `data/`，随后可以直接在页面里切换新 CSV。
+
+## 常用命令
+
+```bash
+python start_server.py
+python getPosition.py -e binance -s 2025-07-18 -n 2025-08-02
+cd frontend && npm run build
+cd frontend && npm run dev
+```
+
+## 说明
+
+- 旧的 `lightweight_charts.py` 不再是主入口。
+- 当前主入口是 `start_server.py -> backend.app.main:app`。
+- 如果代理留空，会直接直连交易所。

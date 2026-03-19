@@ -1,10 +1,4 @@
-dash
-dash-bootstrap-components
-dash-core-components
-dash-html-components
-dash-table
 pandas
-plotly
 python-dotenv
 numpy
 ccxt
@@ -12,3 +6,8 @@ PySocks
 requests[socks]
 aiohttp-socks
 openpyxl
+fastapi
+uvicorn
+pydantic-settings
+python-multipart
+tqdm

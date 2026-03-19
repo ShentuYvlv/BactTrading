@@ -1,1 +1,9 @@
 venv/
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+cache/*.pkl
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
