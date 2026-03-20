@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type {
   ConfigResponse,
   DataFileItem,
+  IndicatorSettings,
   IndicatorState,
   RebuildRequest,
   SymbolItem,
@@ -21,12 +22,14 @@ interface ControlSidebarProps {
   endDate: string
   minTrades: number
   indicators: IndicatorState
+  indicatorSettings: IndicatorSettings
   rebuildForm: RebuildRequest
   loadingChart: boolean
   loadingMore: boolean
   rebuilding: boolean
   onFieldChange: (field: 'exchange' | 'dataFile' | 'symbol' | 'timeframe' | 'startDate' | 'endDate' | 'minTrades', value: string | number) => void
   onIndicatorToggle: (key: keyof IndicatorState) => void
+  onIndicatorSettingsChange: (settings: IndicatorSettings) => void
   onLoadChart: () => void
   onLoadMore: () => void
   onRebuildFieldChange: (field: keyof RebuildRequest, value: string | number) => void
@@ -34,8 +37,7 @@ interface ControlSidebarProps {
 }
 
 const indicatorLabels: Array<{ key: keyof IndicatorState; label: string }> = [
-  { key: 'showEma', label: 'EMA20' },
-  { key: 'showBollinger', label: '布林带' },
+  { key: 'showEma', label: 'EMA' },
   { key: 'showVolume', label: '成交量' },
   { key: 'showRsi', label: 'RSI' },
   { key: 'showMacd', label: 'MACD' },
@@ -61,6 +63,15 @@ function inputClassName() {
   return 'w-full rounded-2xl border border-line bg-panelAlt px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20'
 }
 
+function parsePeriodsInput(value: string) {
+  const parsed = value
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0)
+    .map((item) => Math.round(item))
+  return parsed.length > 0 ? parsed.slice(0, 6) : [20, 50, 200]
+}
+
 export function ControlSidebar({
   config,
   dataFiles,
@@ -73,12 +84,14 @@ export function ControlSidebar({
   endDate,
   minTrades,
   indicators,
+  indicatorSettings,
   rebuildForm,
   loadingChart,
   loadingMore,
   rebuilding,
   onFieldChange,
   onIndicatorToggle,
+  onIndicatorSettingsChange,
   onLoadChart,
   onLoadMore,
   onRebuildFieldChange,
@@ -87,14 +100,6 @@ export function ControlSidebar({
   return (
     <aside className="flex h-full flex-col gap-6 rounded-[28px] border border-white/10 bg-panel/90 p-5 shadow-panel backdrop-blur">
       <section className="space-y-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.24em] text-accentSoft">BactTrading</p>
-          <h1 className="mt-2 text-2xl font-semibold text-white">Workstation</h1>
-          <p className="mt-2 text-sm text-slate-400">
-            FastAPI + React 单机复盘工作台，直接接管旧页面。
-          </p>
-        </div>
-
         <Field label="交易所">
           <select
             className={inputClassName()}
@@ -138,7 +143,7 @@ export function ControlSidebar({
           </select>
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="周期">
             <select
               className={inputClassName()}
@@ -164,7 +169,7 @@ export function ControlSidebar({
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="开始日期">
             <input
               className={inputClassName()}
@@ -183,7 +188,7 @@ export function ControlSidebar({
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {indicatorLabels.map((item) => (
             <button
               key={item.key}
@@ -201,7 +206,91 @@ export function ControlSidebar({
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <section className="space-y-3 rounded-[24px] border border-white/8 bg-[#0d1424] p-4">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">指标设置</p>
+
+          <Field label="EMA 周期">
+            <input
+              className={inputClassName()}
+              type="text"
+              value={indicatorSettings.ema.periods.join(', ')}
+              onChange={(event) =>
+                onIndicatorSettingsChange({
+                  ...indicatorSettings,
+                  ema: {
+                    periods: parsePeriodsInput(event.target.value),
+                  },
+                })
+              }
+            />
+          </Field>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="RSI 周期">
+              <input
+                className={inputClassName()}
+                min={1}
+                type="number"
+                value={indicatorSettings.rsi.period}
+                onChange={(event) =>
+                  onIndicatorSettingsChange({
+                    ...indicatorSettings,
+                    rsi: { period: Number(event.target.value) || 14 },
+                  })
+                }
+              />
+            </Field>
+
+            <Field label="MACD 快线">
+              <input
+                className={inputClassName()}
+                min={1}
+                type="number"
+                value={indicatorSettings.macd.fast_period}
+                onChange={(event) =>
+                  onIndicatorSettingsChange({
+                    ...indicatorSettings,
+                    macd: { ...indicatorSettings.macd, fast_period: Number(event.target.value) || 12 },
+                  })
+                }
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="MACD 慢线">
+              <input
+                className={inputClassName()}
+                min={1}
+                type="number"
+                value={indicatorSettings.macd.slow_period}
+                onChange={(event) =>
+                  onIndicatorSettingsChange({
+                    ...indicatorSettings,
+                    macd: { ...indicatorSettings.macd, slow_period: Number(event.target.value) || 26 },
+                  })
+                }
+              />
+            </Field>
+
+            <Field label="MACD 信号">
+              <input
+                className={inputClassName()}
+                min={1}
+                type="number"
+                value={indicatorSettings.macd.signal_period}
+                onChange={(event) =>
+                  onIndicatorSettingsChange({
+                    ...indicatorSettings,
+                    macd: { ...indicatorSettings.macd, signal_period: Number(event.target.value) || 9 },
+                  })
+                }
+              />
+            </Field>
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             className="rounded-2xl bg-accent px-4 py-3 text-sm font-medium text-ink transition hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-60"
             disabled={loadingChart || !symbol}
@@ -229,7 +318,7 @@ export function ControlSidebar({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="交易所">
             <select
               className={inputClassName()}
@@ -254,7 +343,7 @@ export function ControlSidebar({
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="开始日期">
             <input
               className={inputClassName()}

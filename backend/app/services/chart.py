@@ -18,15 +18,14 @@ logger = logging.getLogger(__name__)
 def add_technical_indicators(df: pd.DataFrame, indicator_settings: IndicatorSettings | None = None) -> pd.DataFrame:
     indicator_settings = indicator_settings or IndicatorSettings()
     df = df.copy()
-    ema_period = indicator_settings.ema.period
-    bollinger_period = indicator_settings.bollinger.period
-    bollinger_std_dev = indicator_settings.bollinger.std_dev
+    ema_periods = sorted({int(period) for period in indicator_settings.ema.periods if int(period) > 0})
     rsi_period = indicator_settings.rsi.period
     macd_fast = indicator_settings.macd.fast_period
     macd_slow = indicator_settings.macd.slow_period
     macd_signal = indicator_settings.macd.signal_period
 
-    df["ema20"] = df["close"].ewm(span=ema_period, adjust=False).mean()
+    for period in ema_periods:
+        df[f"ema_{period}"] = df["close"].ewm(span=period, adjust=False).mean()
 
     delta = df["close"].diff()
     gain = delta.where(delta > 0, 0)
@@ -41,11 +40,6 @@ def add_technical_indicators(df: pd.DataFrame, indicator_settings: IndicatorSett
     rs = avg_gain / avg_loss
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    df["sma20"] = df["close"].rolling(window=bollinger_period).mean()
-    df["std20"] = df["close"].rolling(window=bollinger_period).std()
-    df["upper_band"] = df["sma20"] + (df["std20"] * bollinger_std_dev)
-    df["lower_band"] = df["sma20"] - (df["std20"] * bollinger_std_dev)
-
     df["ema12"] = df["close"].ewm(span=macd_fast, adjust=False).mean()
     df["ema26"] = df["close"].ewm(span=macd_slow, adjust=False).mean()
     df["macd"] = df["ema12"] - df["ema26"]
@@ -58,14 +52,20 @@ def add_technical_indicators(df: pd.DataFrame, indicator_settings: IndicatorSett
 def prepare_chart_payload(df: pd.DataFrame) -> dict:
     frame = df.copy()
     frame["time"] = frame["timestamp"].map(lambda ts: int(pd.Timestamp(ts).timestamp()))
+    ema_series = [
+        {
+            "period": int(column.replace("ema_", "")),
+            "data": frame[["time", column]].rename(columns={column: "value"}).to_dict("records"),
+        }
+        for column in frame.columns
+        if column.startswith("ema_")
+    ]
+    ema_series.sort(key=lambda item: item["period"])
     return {
         "candlestick": frame[["time", "open", "high", "low", "close"]].to_dict("records"),
         "volume": frame[["time", "volume"]].to_dict("records"),
-        "ema20": frame[["time", "ema20"]].rename(columns={"ema20": "value"}).to_dict("records"),
+        "ema_series": ema_series,
         "rsi": frame[["time", "rsi"]].rename(columns={"rsi": "value"}).to_dict("records"),
-        "upper_band": frame[["time", "upper_band"]].rename(columns={"upper_band": "value"}).to_dict("records"),
-        "middle_band": frame[["time", "sma20"]].rename(columns={"sma20": "value"}).to_dict("records"),
-        "lower_band": frame[["time", "lower_band"]].rename(columns={"lower_band": "value"}).to_dict("records"),
         "macd": frame[["time", "macd"]].rename(columns={"macd": "value"}).to_dict("records"),
         "signal": frame[["time", "signal"]].rename(columns={"signal": "value"}).to_dict("records"),
         "histogram": frame[["time", "histogram"]].rename(columns={"histogram": "value"}).to_dict("records"),
@@ -97,8 +97,7 @@ def fetch_ohlcv_data(
     symbol = normalize_symbol(exchange, symbol)
     indicator_settings = indicator_settings or IndicatorSettings()
     indicator_signature = (
-        f"ema{indicator_settings.ema.period}_"
-        f"bb{indicator_settings.bollinger.period}_{indicator_settings.bollinger.std_dev}_"
+        f"ema{'-'.join(map(str, indicator_settings.ema.periods))}_"
         f"rsi{indicator_settings.rsi.period}_"
         f"macd{indicator_settings.macd.fast_period}_{indicator_settings.macd.slow_period}_{indicator_settings.macd.signal_period}"
     )

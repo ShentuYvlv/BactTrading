@@ -4,12 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class EmaSettings(BaseModel):
-    period: int = Field(default=20, ge=1, le=500)
-
-
-class BollingerSettings(BaseModel):
-    period: int = Field(default=20, ge=1, le=500)
-    std_dev: float = Field(default=2.0, gt=0, le=10)
+    periods: list[int] = Field(default_factory=lambda: [20, 50, 200], min_length=1, max_length=6)
 
 
 class RsiSettings(BaseModel):
@@ -24,7 +19,6 @@ class MacdSettings(BaseModel):
 
 class IndicatorSettings(BaseModel):
     ema: EmaSettings = Field(default_factory=EmaSettings)
-    bollinger: BollingerSettings = Field(default_factory=BollingerSettings)
     rsi: RsiSettings = Field(default_factory=RsiSettings)
     macd: MacdSettings = Field(default_factory=MacdSettings)
 

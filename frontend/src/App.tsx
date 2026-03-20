@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { loadChart, loadMoreChart, rebuildPositions, fetchConfig, fetchDataFiles, fetchSymbols } from './lib/api'
 import type {
@@ -16,7 +16,6 @@ import { PositionNavigator } from './features/positions/PositionNavigator'
 
 const DEFAULT_INDICATORS: IndicatorState = {
   showEma: true,
-  showBollinger: true,
   showVolume: true,
   showRsi: true,
   showMacd: false,
@@ -24,8 +23,7 @@ const DEFAULT_INDICATORS: IndicatorState = {
 }
 
 const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
-  ema: { period: 20 },
-  bollinger: { period: 20, std_dev: 2 },
+  ema: { periods: [20, 50, 200] },
   rsi: { period: 14 },
   macd: { fast_period: 12, slow_period: 26, signal_period: 9 },
 }
@@ -42,9 +40,9 @@ function App() {
   const [indicators, setIndicators] = useState(DEFAULT_INDICATORS)
   const [indicatorSettings, setIndicatorSettings] = useState(DEFAULT_INDICATOR_SETTINGS)
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null)
-  const [statusMessage, setStatusMessage] = useState('准备就绪')
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
+  const lastAppliedDateRangeFileRef = useRef<string | null>(null)
+  const lastAppliedSymbolWindowRef = useRef<string | null>(null)
   const [rebuildForm, setRebuildForm] = useState<RebuildRequest>({
     exchange: 'binance',
     start_date: '',
@@ -70,20 +68,15 @@ function App() {
   const chartMutation = useMutation({
     mutationFn: loadChart,
     onSuccess: (data) => {
-      setErrorMessage(null)
       setSelectedPositionId(data.positions[0]?.position_id ?? null)
     },
-    onError: (error: Error) => {
-      setErrorMessage(error.message)
-      setStatusMessage('图表加载失败')
-    },
+    onError: () => {},
   })
 
   const loadMoreMutation = useMutation({
     mutationFn: loadMoreChart,
     onSuccess: (data) => {
       if (!data.chart || !chartMutation.data) {
-        setStatusMessage('没有新增K线')
         return
       }
 
@@ -98,24 +91,16 @@ function App() {
         indicator_settings: indicatorSettings,
       })
     },
-    onError: (error: Error) => {
-      setErrorMessage(error.message)
-      setStatusMessage('同步更多K线失败')
-    },
+    onError: () => {},
   })
 
   const rebuildMutation = useMutation({
     mutationFn: rebuildPositions,
     onSuccess: async (data) => {
-      setStatusMessage(`仓位重建完成: ${data.file_path}`)
-      setErrorMessage(null)
       await queryClient.invalidateQueries({ queryKey: ['data-files'] })
       setDataFile(data.file_path)
     },
-    onError: (error: Error) => {
-      setErrorMessage(error.message)
-      setStatusMessage('仓位重建失败')
-    },
+    onError: () => {},
   })
 
   useEffect(() => {
@@ -150,10 +135,46 @@ function App() {
   }, [symbol, symbolsQuery.data])
 
   useEffect(() => {
-    if (chartMutation.data) {
-      setStatusMessage(`图表已加载: ${chartMutation.data.symbol} ${chartMutation.data.timeframe}`)
+    const dateRange = symbolsQuery.data?.date_range
+    if (!dataFile || !dateRange) {
+      return
     }
-  }, [chartMutation.data])
+    if (lastAppliedDateRangeFileRef.current === dataFile) {
+      return
+    }
+
+    setStartDate(dateRange.start_date)
+    setEndDate(dateRange.end_date)
+    setHasAutoLoaded(false)
+    setRebuildForm((current) => ({
+      ...current,
+      start_date: current.start_date || dateRange.start_date,
+      end_date: current.end_date || dateRange.end_date,
+    }))
+    lastAppliedDateRangeFileRef.current = dataFile
+  }, [dataFile, symbolsQuery.data?.date_range])
+
+  useEffect(() => {
+    if (!dataFile || !symbol || !symbolsQuery.data?.items.length) {
+      return
+    }
+    const symbolMeta = symbolsQuery.data.items.find((item) => item.symbol === symbol)
+    if (!symbolMeta?.first_trade_date) {
+      return
+    }
+
+    const symbolWindowKey = `${dataFile}:${symbol}`
+    if (lastAppliedSymbolWindowRef.current === symbolWindowKey) {
+      return
+    }
+
+    const start = shiftDate(symbolMeta.first_trade_date, -5)
+    const end = symbolMeta.last_trade_date ?? symbolsQuery.data.date_range?.end_date ?? symbolMeta.first_trade_date
+    setStartDate(start)
+    setEndDate(end)
+    setHasAutoLoaded(false)
+    lastAppliedSymbolWindowRef.current = symbolWindowKey
+  }, [dataFile, symbol, symbolsQuery.data])
 
   useEffect(() => {
     const dataFilesReady =
@@ -240,12 +261,17 @@ function App() {
       return
     }
     if (field === 'dataFile') {
-      setDataFile(String(value) || null)
+      const nextFile = String(value) || null
+      setDataFile(nextFile)
+      lastAppliedDateRangeFileRef.current = null
+      lastAppliedSymbolWindowRef.current = null
       setHasAutoLoaded(false)
       return
     }
     if (field === 'symbol') {
       setSymbol(String(value))
+      lastAppliedSymbolWindowRef.current = null
+      setHasAutoLoaded(false)
       return
     }
     if (field === 'timeframe') {
@@ -270,20 +296,9 @@ function App() {
     }))
   }
 
-  function handleApplyIndicatorSettings(nextSettings: IndicatorSettings) {
+  function handleIndicatorSettingsChange(nextSettings: IndicatorSettings) {
     setIndicatorSettings(nextSettings)
-    if (!symbol || !timeframe || !startDate || !endDate) {
-      return
-    }
-    chartMutation.mutate({
-      symbol,
-      timeframe,
-      start_date: startDate,
-      end_date: endDate,
-      data_file: dataFile,
-      exchange,
-      indicator_settings: nextSettings,
-    })
+    setHasAutoLoaded(false)
   }
 
   function handleRebuildFieldChange(field: keyof RebuildRequest, value: string | number) {
@@ -314,12 +329,14 @@ function App() {
               endDate={endDate}
               minTrades={minTrades}
               indicators={indicators}
+              indicatorSettings={indicatorSettings}
               rebuildForm={rebuildForm}
               loadingChart={chartMutation.isPending}
               loadingMore={loadMoreMutation.isPending}
               rebuilding={rebuildMutation.isPending}
               onFieldChange={handleFieldChange}
               onIndicatorToggle={handleIndicatorToggle}
+              onIndicatorSettingsChange={handleIndicatorSettingsChange}
               onLoadChart={() => handleLoadChart()}
               onLoadMore={handleLoadMore}
               onRebuildFieldChange={handleRebuildFieldChange}
@@ -338,33 +355,7 @@ function App() {
             />
           </aside>
 
-          <div className="space-y-3">
-            <section className="rounded-[24px] border border-white/10 bg-panel/78 px-5 py-4 shadow-panel backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Workspace</p>
-                  <p className="mt-2 text-sm text-white">{statusMessage}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
-                    {chartMutation.data ? `${chartMutation.data.symbol} / ${chartMutation.data.timeframe}` : '等待加载'}
-                  </span>
-                  <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
-                    {dataFile ? dataFile.split('/').at(-1) ?? 'CSV' : 'Exchange API'}
-                  </span>
-                  {errorMessage ? (
-                    <p className="rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300">
-                      {errorMessage}
-                    </p>
-                  ) : (
-                    <p className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
-                      运行正常
-                    </p>
-                  )}
-                </div>
-              </div>
-            </section>
-
+          <div>
             <TradingChart
               chartData={chartMutation.data?.chart}
               chartSymbol={chartMutation.data?.symbol ?? symbol}
@@ -380,7 +371,6 @@ function App() {
               onLoadMore={handleLoadMore}
               onTimeframeShortcut={(nextTimeframe) => handleLoadChart({ timeframe: nextTimeframe })}
               onIndicatorToggle={handleIndicatorToggle}
-              onApplyIndicatorSettings={handleApplyIndicatorSettings}
             />
           </div>
         </div>
@@ -390,3 +380,9 @@ function App() {
 }
 
 export default App
+
+function shiftDate(value: string, offsetDays: number) {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + offsetDays)
+  return date.toISOString().slice(0, 10)
+}

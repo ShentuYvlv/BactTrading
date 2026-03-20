@@ -1,6 +1,5 @@
 export type IndicatorKey =
   | 'showEma'
-  | 'showBollinger'
   | 'showVolume'
   | 'showRsi'
   | 'showMacd'
@@ -10,11 +9,7 @@ export type IndicatorState = Record<IndicatorKey, boolean>
 
 export interface IndicatorSettings {
   ema: {
-    period: number
-  }
-  bollinger: {
-    period: number
-    std_dev: number
+    periods: number[]
   }
   rsi: {
     period: number
@@ -55,12 +50,18 @@ export interface DataFilesResponse {
 export interface SymbolItem {
   symbol: string
   trade_count: number
+  first_trade_date?: string | null
+  last_trade_date?: string | null
 }
 
 export interface SymbolsResponse {
   items: SymbolItem[]
   total: number
   data_file?: string
+  date_range?: {
+    start_date: string
+    end_date: string
+  } | null
 }
 
 export interface CandlestickDatum {
@@ -84,11 +85,11 @@ export interface VolumeDatum {
 export interface ChartPayload {
   candlestick: CandlestickDatum[]
   volume: VolumeDatum[]
-  ema20: ValueDatum[]
+  ema_series: Array<{
+    period: number
+    data: ValueDatum[]
+  }>
   rsi: ValueDatum[]
-  upper_band: ValueDatum[]
-  middle_band: ValueDatum[]
-  lower_band: ValueDatum[]
   macd: ValueDatum[]
   signal: ValueDatum[]
   histogram: ValueDatum[]

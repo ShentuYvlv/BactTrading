@@ -17,7 +17,6 @@ import {
   ChevronDown,
   Clock3,
   Crosshair,
-  Eye,
   Minus,
   MousePointer2,
   PanelLeftClose,
@@ -58,7 +57,6 @@ interface TradingChartProps {
   onLoadMore: () => void
   onTimeframeShortcut: (timeframe: string) => void
   onIndicatorToggle: (indicator: IndicatorKey) => void
-  onApplyIndicatorSettings: (settings: IndicatorSettings) => void
 }
 
 interface LegendState {
@@ -82,8 +80,6 @@ interface ChartRefs {
   candleSeries: ISeriesApi<'Candlestick'>
 }
 
-type SettingsPanelKey = 'ema' | 'bollinger' | 'volume' | 'rsi' | 'macd' | null
-type SettingsTabKey = 'inputs' | 'style'
 type DrawingTool =
   | 'cursor'
   | 'select'
@@ -138,87 +134,12 @@ type DragState = {
   startX: number
   startY: number
   originalPoints: DrawingPoint[]
-}
-
-type IndicatorStyleSettings = {
-  ema: {
-    color: string
-    lineWidth: number
-    lineStyle: LineStyle
-  }
-  bollinger: {
-    upperColor: string
-    middleColor: string
-    lowerColor: string
-    lineWidth: number
-    lineStyle: LineStyle
-  }
-  volume: {
-    upColor: string
-    downColor: string
-  }
-  rsi: {
-    color: string
-    lineWidth: number
-    lineStyle: LineStyle
-    upperLevel: number
-    lowerLevel: number
-    levelColor: string
-    levelLineStyle: LineStyle
-  }
-  macd: {
-    macdColor: string
-    signalColor: string
-    lineWidth: number
-    lineStyle: LineStyle
-    positiveColor: string
-    negativeColor: string
-  }
+  handleIndex: number | null
 }
 
 const QUICK_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
 const DEFAULT_PANEL_POSITION = { top: 96, right: 28 }
-const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
-  ema: { period: 20 },
-  bollinger: { period: 20, std_dev: 2 },
-  rsi: { period: 14 },
-  macd: { fast_period: 12, slow_period: 26, signal_period: 9 },
-}
-const DEFAULT_INDICATOR_STYLE_SETTINGS: IndicatorStyleSettings = {
-  ema: {
-    color: '#e1d35c',
-    lineWidth: 2,
-    lineStyle: LineStyle.Solid,
-  },
-  bollinger: {
-    upperColor: 'rgba(125, 211, 252, 0.9)',
-    middleColor: 'rgba(148, 163, 184, 0.8)',
-    lowerColor: 'rgba(125, 211, 252, 0.9)',
-    lineWidth: 1,
-    lineStyle: LineStyle.Dashed,
-  },
-  volume: {
-    upColor: 'rgba(34, 197, 94, 0.65)',
-    downColor: 'rgba(239, 68, 68, 0.65)',
-  },
-  rsi: {
-    color: '#facc15',
-    lineWidth: 2,
-    lineStyle: LineStyle.Solid,
-    upperLevel: 70,
-    lowerLevel: 30,
-    levelColor: 'rgba(148, 163, 184, 0.58)',
-    levelLineStyle: LineStyle.Dashed,
-  },
-  macd: {
-    macdColor: '#a78bfa',
-    signalColor: '#fb7185',
-    lineWidth: 2,
-    lineStyle: LineStyle.Solid,
-    positiveColor: 'rgba(34, 197, 94, 0.55)',
-    negativeColor: 'rgba(239, 68, 68, 0.55)',
-  },
-}
+const EMA_LINE_COLORS = ['#e1d35c', '#2d60d8', '#53b36b', '#f97316', '#a855f7', '#38bdf8']
 const DEFAULT_FIB_LEVELS: DrawingFibLevel[] = [
   { value: 0, color: 'rgba(125, 211, 252, 0.88)', visible: true },
   { value: 0.236, color: 'rgba(94, 234, 212, 0.78)', visible: true },
@@ -244,7 +165,6 @@ export function TradingChart({
   onLoadMore,
   onTimeframeShortcut,
   onIndicatorToggle,
-  onApplyIndicatorSettings,
 }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null)
   const chartRefs = useRef<ChartRefs | null>(null)
@@ -254,18 +174,13 @@ export function TradingChart({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [panelPosition, setPanelPosition] = useState(DEFAULT_PANEL_POSITION)
   const [jumpValue, setJumpValue] = useState('1')
-  const [settingsPanel, setSettingsPanel] = useState<SettingsPanelKey>(null)
-  const [settingsTab, setSettingsTab] = useState<SettingsTabKey>('inputs')
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
-  const [draftSettings, setDraftSettings] = useState<IndicatorSettings>(indicatorSettings)
-  const [indicatorStyleSettings, setIndicatorStyleSettings] = useState<IndicatorStyleSettings>(DEFAULT_INDICATOR_STYLE_SETTINGS)
-  const [draftIndicatorStyleSettings, setDraftIndicatorStyleSettings] = useState<IndicatorStyleSettings>(
-    DEFAULT_INDICATOR_STYLE_SETTINGS,
-  )
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('cursor')
   const [drawings, setDrawings] = useState<DrawingObject[]>([])
   const [draftDrawing, setDraftDrawing] = useState<DrawingDraft | null>(null)
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [hoveredDrawingId, setHoveredDrawingId] = useState<string | null>(null)
+  const [hoveredMarkerPositionId, setHoveredMarkerPositionId] = useState<string | null>(null)
   const [drawingSettingsOpen, setDrawingSettingsOpen] = useState(false)
   const [drawingSettingsTab, setDrawingSettingsTab] = useState<DrawingSettingsTab>('style')
   const [overlayRevision, setOverlayRevision] = useState(0)
@@ -273,21 +188,30 @@ export function TradingChart({
   const dragStateRef = useRef<DragState | null>(null)
 
   const dataIndexes = useMemo(() => buildDataIndexes(chartData), [chartData])
+  const markerPositionIndex = useMemo(
+    () =>
+      chartData
+        ? buildMarkerPositionIndex(
+            positions,
+            chartData.candlestick.map((item) => item.time),
+          )
+        : new Map<number, string>(),
+    [chartData, positions],
+  )
+  const displayedPositionId = hoveredMarkerPositionId ?? selectedPositionId
   const selectedIndex = useMemo(
-    () => positions.findIndex((position) => position.position_id === selectedPositionId),
-    [positions, selectedPositionId],
+    () => positions.findIndex((position) => position.position_id === displayedPositionId),
+    [displayedPositionId, positions],
   )
   const selectedPosition = selectedIndex >= 0 ? positions[selectedIndex] : positions[0]
   const paneOverlays = useMemo(
     () => buildPaneOverlays(indicators, indicatorSettings),
     [indicatorSettings, indicators],
   )
-  const settingsError = useMemo(() => validateIndicatorSettings(draftSettings), [draftSettings])
   const activeIndicatorCount = useMemo(
     () =>
       [
         indicators.showEma,
-        indicators.showBollinger,
         indicators.showVolume,
         indicators.showRsi,
         indicators.showMacd,
@@ -327,19 +251,60 @@ export function TradingChart({
   }, [selectedIndex])
 
   useEffect(() => {
-    setDraftSettings(indicatorSettings)
-  }, [indicatorSettings])
-
-  useEffect(() => {
-    setDraftIndicatorStyleSettings(indicatorStyleSettings)
-  }, [indicatorStyleSettings])
-
-  useEffect(() => {
     setDrawingSettingsOpen(Boolean(selectedDrawingId))
     if (!selectedDrawingId) {
       setDrawingSettingsTab('style')
     }
   }, [selectedDrawingId])
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const dragState = dragStateRef.current
+      if (!dragState || dragState.handleIndex === null) {
+        return
+      }
+      const point = resolveDrawingPointFromClient(
+        event.clientX,
+        event.clientY,
+        chartRefs.current,
+        chartContainerRef.current,
+        pricePaneHeight,
+      )
+      if (!point) {
+        return
+      }
+
+      setDrawings((current) =>
+        current.map((drawing) => {
+          if (drawing.id !== dragState.drawingId) {
+            return drawing
+          }
+          const nextPoints = [...drawing.points]
+          const targetIndex: number =
+            drawing.tool === 'horizontalLine' || drawing.tool === 'verticalLine' ? 0 : (dragState.handleIndex ?? -1)
+          if (targetIndex < 0 || targetIndex >= nextPoints.length) {
+            return drawing
+          }
+          nextPoints[targetIndex] = point.data
+          return { ...drawing, points: nextPoints }
+        }),
+      )
+      setOverlayRevision((current) => current + 1)
+    }
+
+    const handleMouseUp = () => {
+      if (dragStateRef.current?.handleIndex !== null) {
+        dragStateRef.current = null
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [pricePaneHeight])
 
   useEffect(() => {
     if (!drawingStorageKey) {
@@ -439,57 +404,21 @@ export function TradingChart({
     candleSeries.setData(toCandlestickSeriesData(chartData.candlestick))
 
     if (indicators.showEma) {
-      const emaSeries = chart.addSeries(
-        LineSeries,
-        {
-          color: indicatorStyleSettings.ema.color,
-          lineWidth: toLineWidth(indicatorStyleSettings.ema.lineWidth),
-          lineStyle: indicatorStyleSettings.ema.lineStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        },
-        0,
-      )
-      emaSeries.setData(toLineSeriesData(chartData.ema20))
-    }
-
-    if (indicators.showBollinger) {
-      const upper = chart.addSeries(
-        LineSeries,
-        {
-          color: indicatorStyleSettings.bollinger.upperColor,
-          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
-          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        },
-        0,
-      )
-      const middle = chart.addSeries(
-        LineSeries,
-        {
-          color: indicatorStyleSettings.bollinger.middleColor,
-          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
-          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        },
-        0,
-      )
-      const lower = chart.addSeries(
-        LineSeries,
-        {
-          color: indicatorStyleSettings.bollinger.lowerColor,
-          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
-          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        },
-        0,
-      )
-      upper.setData(toLineSeriesData(chartData.upper_band))
-      middle.setData(toLineSeriesData(chartData.middle_band))
-      lower.setData(toLineSeriesData(chartData.lower_band))
+      const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
+      emaSeriesList.forEach((series, index) => {
+        const emaSeries = chart.addSeries(
+          LineSeries,
+          {
+            color: EMA_LINE_COLORS[index % EMA_LINE_COLORS.length],
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+          },
+          0,
+        )
+        emaSeries.setData(toLineSeriesData(series.data))
+      })
     }
 
     let paneIndex = 1
@@ -510,8 +439,8 @@ export function TradingChart({
           value: item.volume,
           color:
             chartData.candlestick[index]?.close >= chartData.candlestick[index]?.open
-              ? indicatorStyleSettings.volume.upColor
-              : indicatorStyleSettings.volume.downColor,
+              ? 'rgba(34, 197, 94, 0.65)'
+              : 'rgba(239, 68, 68, 0.65)',
         })),
       )
       paneIndex += 1
@@ -521,9 +450,9 @@ export function TradingChart({
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
-          color: indicatorStyleSettings.rsi.color,
-          lineWidth: toLineWidth(indicatorStyleSettings.rsi.lineWidth),
-          lineStyle: indicatorStyleSettings.rsi.lineStyle,
+          color: '#facc15',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -531,17 +460,17 @@ export function TradingChart({
       )
       rsiSeries.setData(toLineSeriesData(chartData.rsi))
       rsiSeries.createPriceLine({
-        price: indicatorStyleSettings.rsi.upperLevel,
-        color: indicatorStyleSettings.rsi.levelColor,
-        lineStyle: indicatorStyleSettings.rsi.levelLineStyle,
+        price: 70,
+        color: 'rgba(148, 163, 184, 0.58)',
+        lineStyle: LineStyle.Dashed,
         lineWidth: 1,
         axisLabelVisible: true,
         title: 'Upper',
       })
       rsiSeries.createPriceLine({
-        price: indicatorStyleSettings.rsi.lowerLevel,
-        color: indicatorStyleSettings.rsi.levelColor,
-        lineStyle: indicatorStyleSettings.rsi.levelLineStyle,
+        price: 30,
+        color: 'rgba(148, 163, 184, 0.58)',
+        lineStyle: LineStyle.Dashed,
         lineWidth: 1,
         axisLabelVisible: true,
         title: 'Lower',
@@ -553,9 +482,9 @@ export function TradingChart({
       const macdLine = chart.addSeries(
         LineSeries,
         {
-          color: indicatorStyleSettings.macd.macdColor,
-          lineWidth: toLineWidth(indicatorStyleSettings.macd.lineWidth),
-          lineStyle: indicatorStyleSettings.macd.lineStyle,
+          color: '#a78bfa',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -564,9 +493,9 @@ export function TradingChart({
       const signalLine = chart.addSeries(
         LineSeries,
         {
-          color: indicatorStyleSettings.macd.signalColor,
-          lineWidth: toLineWidth(indicatorStyleSettings.macd.lineWidth),
-          lineStyle: indicatorStyleSettings.macd.lineStyle,
+          color: '#fb7185',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -589,13 +518,14 @@ export function TradingChart({
           value: item.value,
           color:
             item.value >= 0
-              ? indicatorStyleSettings.macd.positiveColor
-              : indicatorStyleSettings.macd.negativeColor,
+              ? 'rgba(34, 197, 94, 0.55)'
+              : 'rgba(239, 68, 68, 0.55)',
         })),
       )
     }
 
-    createSeriesMarkers(candleSeries, indicators.showTradeMarkers ? buildMarkers(positions) : [])
+    const markerTimes = chartData.candlestick.map((item) => item.time)
+    createSeriesMarkers(candleSeries, indicators.showTradeMarkers ? buildMarkers(positions, markerTimes) : [])
 
     chart.timeScale().fitContent()
     applyPaneWeights(chart, indicators)
@@ -617,11 +547,13 @@ export function TradingChart({
           }
         | undefined
       if (!candle || candle.open === undefined) {
+        setHoveredMarkerPositionId(null)
         return
       }
       const candleTime = Number(candle.time)
+      const hoveredMarkerId = markerPositionIndex.get(candleTime) ?? null
+      setHoveredMarkerPositionId((current) => (current === hoveredMarkerId ? current : hoveredMarkerId))
       const volume = findValueAtTime(chartData.volume, candleTime, dataIndexes?.volume)
-      const ema = findValueAtTime(chartData.ema20, candleTime, dataIndexes?.ema20)
       const rsi = findValueAtTime(chartData.rsi, candleTime, dataIndexes?.rsi)
       const macd = findValueAtTime(chartData.macd, candleTime, dataIndexes?.macd)
       const signal = findValueAtTime(chartData.signal, candleTime, dataIndexes?.signal)
@@ -632,7 +564,7 @@ export function TradingChart({
         low: formatNumber(candle.low),
         close: formatNumber(candle.close),
         volume: formatCompactNumber(volume, 2),
-        ema: formatNumber(ema),
+        ema: formatEmaLegend(chartData, dataIndexes, candleTime),
         rsi: formatNumber(rsi),
         macd: formatNumber(macd),
         signal: formatNumber(signal),
@@ -653,14 +585,22 @@ export function TradingChart({
       if (clickedTime === null) {
         return
       }
+      const candleSpacing =
+        chartData.candlestick.length > 1
+          ? Math.max(chartData.candlestick[1].time - chartData.candlestick[0].time, 60)
+          : 3600
 
       const matchedPosition =
         positions.find((position) => position.open_time === clickedTime || position.close_time === clickedTime) ??
-        findNearestPositionByTime(positions, clickedTime)
+        findNearestPositionByTime(positions, clickedTime, candleSpacing * 2)
 
       if (matchedPosition) {
         onSelectPosition(matchedPosition.position_id)
+        return
       }
+      setSelectedDrawingId(null)
+      setDrawingSettingsOpen(false)
+      setHoveredDrawingId(null)
     }
 
     const scheduleOverlayRefresh = () => {
@@ -706,7 +646,7 @@ export function TradingChart({
       chart.remove()
       chartRefs.current = null
     }
-  }, [chartData, dataIndexes, indicatorStyleSettings, indicators, onSelectPosition, positions])
+  }, [chartData, dataIndexes, indicators, markerPositionIndex, onSelectPosition, positions])
 
   useEffect(() => {
     if (!chartRefs.current || !chartData || !selectedPositionId) {
@@ -775,8 +715,6 @@ export function TradingChart({
         setDrawingTool('rectangle')
       } else if (lowerKey === 'e') {
         onIndicatorToggle('showEma')
-      } else if (lowerKey === 'b') {
-        onIndicatorToggle('showBollinger')
       } else if (lowerKey === 'i') {
         onIndicatorToggle('showRsi')
       } else if (lowerKey === 'm') {
@@ -810,71 +748,17 @@ export function TradingChart({
     .join(' / ')
   const preferredTimeframes = ['15m', '30m', '1h', '4h', '1d', '1w']
   const visibleTimeframes = timeframeOptions.filter((option) => preferredTimeframes.includes(option.value))
-  const openIndicatorSettings = (panel: Exclude<SettingsPanelKey, null>, tab: SettingsTabKey = 'inputs') => {
-    setSettingsTab(tab)
-    setDraftSettings(indicatorSettings)
-    setDraftIndicatorStyleSettings(indicatorStyleSettings)
-    setSettingsPanel(panel)
-    setIndicatorMenuOpen(false)
-  }
-  const indicatorRows: Array<{
-    key: IndicatorKey
-    label: string
-    active: boolean
-    settingsPanel: Exclude<SettingsPanelKey, null> | null
-    settingsTab: SettingsTabKey
-  }> = [
-    {
-      key: 'showEma',
-      label: `EMA ${indicatorSettings.ema.period}`,
-      active: indicators.showEma,
-      settingsPanel: 'ema',
-      settingsTab: 'inputs',
-    },
-    {
-      key: 'showBollinger',
-      label: `BB ${indicatorSettings.bollinger.period} ${indicatorSettings.bollinger.std_dev}`,
-      active: indicators.showBollinger,
-      settingsPanel: 'bollinger',
-      settingsTab: 'inputs',
-    },
-    {
-      key: 'showVolume',
-      label: 'VOL',
-      active: indicators.showVolume,
-      settingsPanel: 'volume',
-      settingsTab: 'style',
-    },
-    {
-      key: 'showRsi',
-      label: `RSI ${indicatorSettings.rsi.period}`,
-      active: indicators.showRsi,
-      settingsPanel: 'rsi',
-      settingsTab: 'inputs',
-    },
+  const indicatorRows: Array<{ key: IndicatorKey; label: string; active: boolean }> = [
+    { key: 'showEma', label: `EMA ${indicatorSettings.ema.periods.join('/')}`, active: indicators.showEma },
+    { key: 'showVolume', label: 'VOL', active: indicators.showVolume },
+    { key: 'showRsi', label: `RSI ${indicatorSettings.rsi.period}`, active: indicators.showRsi },
     {
       key: 'showMacd',
       label: `MACD ${indicatorSettings.macd.fast_period}, ${indicatorSettings.macd.slow_period}, ${indicatorSettings.macd.signal_period}`,
       active: indicators.showMacd,
-      settingsPanel: 'macd',
-      settingsTab: 'inputs',
     },
-    {
-      key: 'showTradeMarkers',
-      label: '交易标记',
-      active: indicators.showTradeMarkers,
-      settingsPanel: null,
-      settingsTab: 'inputs',
-    },
+    { key: 'showTradeMarkers', label: '交易标记', active: indicators.showTradeMarkers },
   ]
-  const activeIndicatorRows = indicatorRows.filter((row) => row.active)
-  const openRowSettings = (row: { settingsPanel: Exclude<SettingsPanelKey, null> | null; settingsTab: SettingsTabKey }) => {
-    if (!row.settingsPanel) {
-      return null
-    }
-    const panel = row.settingsPanel
-    return () => openIndicatorSettings(panel, row.settingsTab)
-  }
   const updateSelectedDrawing = (updater: (drawing: DrawingObject) => DrawingObject) => {
     if (!selectedDrawingId) {
       return
@@ -939,21 +823,21 @@ export function TradingChart({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-white/8 bg-[#0f1622] px-4 py-3 text-sm">
-        <div className="flex items-center gap-2 text-white">
+      <div className="flex min-h-[52px] items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-white/8 bg-[#0f1622] px-4 py-3 text-sm whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex shrink-0 items-center gap-2 text-white">
           <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400/90" />
           <span className="font-medium">
             {chartSymbol} · {timeframe} · Review Workspace
           </span>
         </div>
-        <span className="text-slate-400">{legend?.time ?? '--'}</span>
-        <span className={cx('font-medium', legend?.isUp ? 'text-emerald-400' : 'text-rose-400')}>
+        <span className="shrink-0 font-mono tabular-nums text-slate-400">{legend?.time ?? '--'}</span>
+        <span className={cx('shrink-0 font-mono font-medium tabular-nums', legend?.isUp ? 'text-emerald-400' : 'text-rose-400')}>
           开 {legend?.open ?? '--'} 高 {legend?.high ?? '--'} 低 {legend?.low ?? '--'} 收 {legend?.close ?? '--'} {legend?.delta ?? '--'} ({legend?.deltaPct ?? '--'})
         </span>
-        <span className="text-slate-400">Vol {legend?.volume ?? '--'}</span>
-        <span className="text-[#e1d35c]">EMA {legend?.ema ?? '--'}</span>
-        <span className="text-[#2d60d8]">RSI {legend?.rsi ?? '--'}</span>
-        <span className="text-[#53b36b]">MACD {legend?.macd ?? '--'}</span>
+        <span className="shrink-0 font-mono tabular-nums text-slate-400">Vol {legend?.volume ?? '--'}</span>
+        <span className="shrink-0 font-mono tabular-nums text-[#e1d35c]">EMA {legend?.ema ?? '--'}</span>
+        <span className="shrink-0 font-mono tabular-nums text-[#2d60d8]">RSI {legend?.rsi ?? '--'}</span>
+        <span className="shrink-0 font-mono tabular-nums text-[#53b36b]">MACD {legend?.macd ?? '--'}</span>
       </div>
 
       {indicatorMenuOpen ? (
@@ -974,7 +858,6 @@ export function TradingChart({
                 key={row.key}
                 active={row.active}
                 label={row.label}
-                onConfigure={openRowSettings(row)}
                 onToggle={() => onIndicatorToggle(row.key)}
               />
             ))}
@@ -1014,77 +897,24 @@ export function TradingChart({
             }}
           />
 
-          <div className="pointer-events-none absolute left-[4.75rem] top-4 z-30 flex max-w-[min(36rem,calc(100%-6rem))] flex-col gap-2">
-            {activeIndicatorRows.length > 0 ? (
-              <div className="pointer-events-auto flex flex-col gap-1.5 rounded-[18px] border border-white/8 bg-[#08111d]/68 px-2 py-2 shadow-xl backdrop-blur">
-                {activeIndicatorRows.map((row) => (
-                  <ChartIndicatorRow
-                    key={row.key}
-                    label={row.label}
-                    onConfigure={openRowSettings(row)}
-                    onToggle={() => onIndicatorToggle(row.key)}
-                  />
-                ))}
-              </div>
-            ) : null}
-
-            {settingsPanel ? (
-              <IndicatorSettingsPanel
-                draftSettings={draftSettings}
-                draftIndicatorStyleSettings={draftIndicatorStyleSettings}
-                error={settingsError}
-                panel={settingsPanel}
-                settingsTab={settingsTab}
-                onApply={() => {
-                  if (settingsError) {
-                    return
-                  }
-                  setIndicatorStyleSettings(draftIndicatorStyleSettings)
-                  onApplyIndicatorSettings(draftSettings)
-                  setSettingsPanel(null)
-                }}
-                onChange={setDraftSettings}
-                onChangeStyle={setDraftIndicatorStyleSettings}
-                onClose={() => setSettingsPanel(null)}
-                onReset={() => setDraftSettings(DEFAULT_INDICATOR_SETTINGS)}
-                onResetStyle={() => setDraftIndicatorStyleSettings(DEFAULT_INDICATOR_STYLE_SETTINGS)}
-                onSelectTab={setSettingsTab}
-              />
-            ) : null}
-          </div>
-
           {selectedDrawing ? (
-            <div className="pointer-events-none absolute right-4 top-4 z-40 flex max-w-[min(26rem,calc(100%-6rem))] flex-col items-end gap-2">
-              <div className="pointer-events-auto inline-flex items-center gap-2 rounded-[18px] border border-white/10 bg-[#08111d]/92 px-3 py-2 shadow-xl backdrop-blur">
-                <span className="max-w-[12rem] truncate text-sm font-medium text-white">{drawingToolLabel(selectedDrawing.tool)}</span>
-                <button
-                  className={cx(
-                    'inline-flex h-9 w-9 items-center justify-center rounded-xl border text-slate-300 transition hover:text-white',
-                    drawingSettingsOpen ? 'border-sky-400/60 bg-sky-500/15' : 'border-white/8 bg-white/4 hover:border-slate-400',
-                  )}
-                  title="对象设置"
-                  type="button"
-                  onClick={() => setDrawingSettingsOpen((current) => !current)}
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </button>
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/8 text-rose-200 transition hover:border-rose-400/50"
-                  title="删除对象"
-                  type="button"
-                  onClick={() => {
-                    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
-                    setSelectedDrawingId(null)
-                    setDrawingSettingsOpen(false)
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+            <div className="pointer-events-none absolute left-1/2 top-4 z-40 flex w-[min(100%-7rem,42rem)] -translate-x-1/2 flex-col items-center gap-2">
+              <DrawingQuickToolbar
+                drawing={selectedDrawing}
+                expanded={drawingSettingsOpen}
+                onDelete={() => {
+                  setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
+                  setSelectedDrawingId(null)
+                  setDrawingSettingsOpen(false)
+                }}
+                onOpenSettings={() => setDrawingSettingsOpen((current) => !current)}
+                onUpdate={(updater) => updateSelectedDrawing(updater)}
+              />
 
               {drawingSettingsOpen ? (
                 <DrawingObjectSettingsPanel
                   drawing={selectedDrawing}
+                  compact
                   tab={drawingSettingsTab}
                   onClose={() => setDrawingSettingsOpen(false)}
                   onDelete={() => {
@@ -1109,15 +939,8 @@ export function TradingChart({
                 <PaneHeader
                   key={overlay.key}
                   description={overlay.description}
-                  showSettings={overlay.showSettings}
                   title={overlay.title}
                   top={overlay.top}
-                  onSettings={() => {
-                    if (!overlay.settingsKey) {
-                      return
-                    }
-                    openIndicatorSettings(overlay.settingsKey, overlay.settingsKey === 'volume' ? 'style' : 'inputs')
-                  }}
                 />
               ))}
           </div>
@@ -1129,44 +952,10 @@ export function TradingChart({
 
           <div
             data-testid="drawing-overlay"
-            className={cx(
-              'absolute left-0 top-0 z-10 overflow-hidden rounded-t-[22px]',
-              drawingTool === 'cursor' ? 'pointer-events-none' : 'pointer-events-auto',
-            )}
+            className="pointer-events-none absolute left-0 top-0 z-10 overflow-hidden rounded-t-[22px]"
             style={{
               width: '100%',
               height: pricePaneHeight > 0 ? `${pricePaneHeight}px` : undefined,
-            }}
-            onMouseDown={handleDrawingMouseDown({
-              chartRefs,
-              chartContainerRef,
-              drawingTool,
-              drawings,
-              pricePaneHeight,
-              setDraftDrawing,
-              setDrawings,
-              setOverlayRevision,
-              setSelectedDrawingId,
-              dragStateRef,
-            })}
-            onMouseMove={handleDrawingMouseMove({
-              chartRefs,
-              chartContainerRef,
-              drawingTool,
-              draftDrawing,
-              pricePaneHeight,
-              setDraftDrawing,
-              setDrawings,
-              setOverlayRevision,
-              dragStateRef,
-            })}
-            onMouseUp={() => {
-              dragStateRef.current = null
-            }}
-            onMouseLeave={() => {
-              if (!draftDrawing) {
-                dragStateRef.current = null
-              }
             }}
           >
             <svg className="h-full w-full">
@@ -1174,11 +963,74 @@ export function TradingChart({
                 <DrawingShape
                   key={drawing.id}
                   drawing={drawing}
+                  hovered={drawing.id === hoveredDrawingId}
                   selected={drawing.id === selectedDrawingId}
+                  onHandleMouseDown={(handleIndex, event) => {
+                    event.stopPropagation()
+                    setSelectedDrawingId(drawing.id)
+                    setDrawingSettingsOpen(true)
+                    setDrawingTool('cursor')
+                    dragStateRef.current = {
+                      drawingId: drawing.id,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      originalPoints:
+                        drawings.find((source) => source.id === drawing.id)?.points ?? [],
+                      handleIndex,
+                    }
+                  }}
+                  onSelect={() => {
+                    setSelectedDrawingId(drawing.id)
+                    setDrawingSettingsOpen(true)
+                    setDrawingTool('cursor')
+                  }}
+                  onHoverChange={(active) => {
+                    if (active) {
+                      setHoveredDrawingId(drawing.id)
+                    } else {
+                      setHoveredDrawingId((current) => (current === drawing.id ? null : current))
+                    }
+                  }}
                 />
               ))}
-              {renderedDraftDrawing ? <DrawingShape drawing={renderedDraftDrawing} selected={false} draft /> : null}
+              {renderedDraftDrawing ? <DrawingShape drawing={renderedDraftDrawing} hovered={false} selected={false} draft /> : null}
             </svg>
+            <div
+              className={cx('absolute inset-0', drawingTool === 'cursor' ? 'pointer-events-none' : 'pointer-events-auto')}
+              onMouseDown={handleDrawingMouseDown({
+                chartRefs,
+                chartContainerRef,
+                drawingTool,
+                drawings,
+                pricePaneHeight,
+                setDraftDrawing,
+                setDrawings,
+                setOverlayRevision,
+                setSelectedDrawingId,
+                setDrawingSettingsOpen,
+                setDrawingTool,
+                dragStateRef,
+              })}
+              onMouseMove={handleDrawingMouseMove({
+                chartRefs,
+                chartContainerRef,
+                drawingTool,
+                draftDrawing,
+                pricePaneHeight,
+                setDraftDrawing,
+                setDrawings,
+                setOverlayRevision,
+                dragStateRef,
+              })}
+              onMouseUp={() => {
+                dragStateRef.current = null
+              }}
+              onMouseLeave={() => {
+                if (!draftDrawing) {
+                  dragStateRef.current = null
+                }
+              }}
+            />
           </div>
 
         </div>
@@ -1417,12 +1269,10 @@ function IndicatorMenuRow({
   active,
   label,
   onToggle,
-  onConfigure,
 }: {
   active: boolean
   label: string
   onToggle: () => void
-  onConfigure: (() => void) | null
 }) {
   return (
     <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/5 px-3 py-2">
@@ -1441,49 +1291,126 @@ function IndicatorMenuRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-white">{label}</p>
       </div>
-      {onConfigure ? (
-        <button
-          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 transition hover:border-sky-400/50 hover:text-white"
-          type="button"
-          onClick={onConfigure}
-        >
-          设置
-        </button>
-      ) : null}
     </div>
   )
 }
 
-function ChartIndicatorRow({
-  label,
-  onToggle,
-  onConfigure,
+function DrawingQuickToolbar({
+  drawing,
+  expanded,
+  onOpenSettings,
+  onDelete,
+  onUpdate,
 }: {
-  label: string
-  onToggle: () => void
-  onConfigure: (() => void) | null
+  drawing: DrawingObject
+  expanded: boolean
+  onOpenSettings: () => void
+  onDelete: () => void
+  onUpdate: (updater: (drawing: DrawingObject) => DrawingObject) => void
 }) {
+  const canFill = drawing.tool === 'rectangle' || drawing.tool === 'parallelChannel' || drawing.tool === 'fibRetracement'
   return (
-    <div className="flex items-center gap-2 rounded-xl px-2 py-1 text-sm text-slate-200">
-      <span className="min-w-0 flex-1 truncate text-[15px] text-slate-200">{label}</span>
-      <button
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-slate-300 transition hover:border-slate-400 hover:text-white"
-        title="隐藏指标"
-        type="button"
-        onClick={onToggle}
+    <div className="pointer-events-auto inline-flex max-w-full items-center gap-2 rounded-[16px] border border-white/10 bg-[#15181e]/94 px-3 py-2 shadow-2xl backdrop-blur">
+      <span className="max-w-[9rem] truncate px-1 text-sm font-medium text-slate-200">{drawingToolLabel(drawing.tool)}</span>
+
+      <label
+        className="flex h-9 w-10 cursor-pointer items-center justify-center rounded-[10px] border border-white/12 bg-[#1d2129] transition hover:border-white/30"
+        title="线条颜色"
       >
-        <Eye className="h-4 w-4" />
+        <span
+          className="h-5 w-5 rounded-md border border-white/25"
+          style={{ backgroundColor: normalizeColorInput(drawing.settings.lineColor) }}
+        />
+        <input
+          className="sr-only"
+          type="color"
+          value={normalizeColorInput(drawing.settings.lineColor)}
+          onChange={(event) =>
+            onUpdate((current) => ({
+              ...current,
+              settings: { ...current.settings, lineColor: event.target.value },
+            }))
+          }
+        />
+      </label>
+
+      <button
+        className="inline-flex h-9 items-center justify-center rounded-[10px] border border-white/12 bg-[#1d2129] px-3 text-sm text-slate-200 transition hover:border-white/30 hover:text-white"
+        title="线型"
+        type="button"
+        onClick={() =>
+          onUpdate((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              lineStyle: nextLineStyle(current.settings.lineStyle),
+            },
+          }))
+        }
+      >
+        <span className={cx('w-9 border-t-2', drawing.settings.lineStyle === LineStyle.Dashed ? 'border-dashed' : drawing.settings.lineStyle === LineStyle.Dotted ? 'border-dotted' : 'border-solid')} />
       </button>
-      {onConfigure ? (
-        <button
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-slate-300 transition hover:border-sky-400/50 hover:text-white"
-          title="指标设置"
-          type="button"
-          onClick={onConfigure}
+
+      <button
+        className="inline-flex h-9 items-center justify-center rounded-[10px] border border-white/12 bg-[#1d2129] px-3 text-sm text-slate-200 transition hover:border-white/30 hover:text-white"
+        title="线宽"
+        type="button"
+        onClick={() =>
+          onUpdate((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              lineWidth: nextLineWidth(current.settings.lineWidth),
+            },
+          }))
+        }
+      >
+        {drawing.settings.lineWidth}px
+      </button>
+
+      {canFill ? (
+        <label
+          className="flex h-9 w-10 cursor-pointer items-center justify-center rounded-[10px] border border-white/12 bg-[#1d2129] transition hover:border-white/30"
+          title="填充颜色"
         >
-          <SlidersHorizontal className="h-4 w-4" />
-        </button>
+          <span
+            className="h-5 w-5 rounded-md border border-white/25"
+            style={{ backgroundColor: normalizeColorInput(drawing.settings.fillColor) }}
+          />
+          <input
+            className="sr-only"
+            type="color"
+            value={normalizeColorInput(drawing.settings.fillColor)}
+            onChange={(event) =>
+              onUpdate((current) => ({
+                ...current,
+                settings: { ...current.settings, fillColor: event.target.value },
+              }))
+            }
+          />
+        </label>
       ) : null}
+
+      <button
+        className={cx(
+          'inline-flex h-9 w-10 items-center justify-center rounded-[10px] border bg-[#1d2129] transition hover:text-white',
+          expanded ? 'border-sky-400/70 text-white' : 'border-white/12 text-slate-200 hover:border-white/30',
+        )}
+        title="详细设置"
+        type="button"
+        onClick={onOpenSettings}
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+      </button>
+
+      <button
+        className="inline-flex h-9 w-10 items-center justify-center rounded-[10px] border border-rose-400/20 bg-[#1d2129] text-rose-200 transition hover:border-rose-400/50"
+        title="删除对象"
+        type="button"
+        onClick={onDelete}
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
     </div>
   )
 }
@@ -1545,18 +1472,40 @@ function DrawingToolbar({
 
 function DrawingShape({
   drawing,
+  hovered,
   selected,
   draft,
+  onSelect,
+  onHandleMouseDown,
+  onHoverChange,
 }: {
   drawing: ProjectedDrawing
+  hovered: boolean
   selected: boolean
   draft?: boolean
+  onSelect?: () => void
+  onHandleMouseDown?: (handleIndex: number, event: ReactMouseEvent<SVGCircleElement>) => void
+  onHoverChange?: (active: boolean) => void
 }) {
-  const stroke = draft ? 'rgba(125, 211, 252, 0.95)' : selected ? '#fbbf24' : drawing.lineColor
-  const strokeWidth = draft ? drawing.lineWidth : selected ? Math.max(drawing.lineWidth, 2.5) : drawing.lineWidth
+  const stroke = draft ? 'rgba(125, 211, 252, 0.95)' : selected ? '#fbbf24' : hovered ? '#93c5fd' : drawing.lineColor
+  const strokeWidth =
+    draft ? drawing.lineWidth : selected ? Math.max(drawing.lineWidth, 2.5) : hovered ? Math.max(drawing.lineWidth, 2.2) : drawing.lineWidth
   const dashArray = lineStyleToDashArray(drawing.lineStyle)
   return (
-    <g>
+    <g
+      className={draft ? undefined : 'cursor-pointer'}
+      pointerEvents={draft ? 'none' : 'visiblePainted'}
+      onMouseEnter={draft || !onHoverChange ? undefined : () => onHoverChange(true)}
+      onMouseLeave={draft || !onHoverChange ? undefined : () => onHoverChange(false)}
+      onMouseDown={
+        draft || !onSelect
+          ? undefined
+          : (event) => {
+              event.stopPropagation()
+              onSelect()
+            }
+      }
+    >
       {drawing.fills.map((fill, index) => (
         <polygon key={`fill-${index}`} fill={fill.fill} points={fill.points} />
       ))}
@@ -1636,6 +1585,14 @@ function DrawingShape({
               r="4"
               stroke={stroke}
               strokeWidth="1.5"
+              onMouseDown={
+                onHandleMouseDown
+                  ? (event) => {
+                      onHandleMouseDown(index, event)
+                    }
+                  : undefined
+              }
+              pointerEvents="all"
             />
           ))
         : null}
@@ -1674,504 +1631,16 @@ function PaneHeader({
   title,
   description,
   top,
-  showSettings,
-  onSettings,
 }: {
   title: string
   description: string
   top: string
-  showSettings: boolean
-  onSettings: () => void
 }) {
   return (
     <div className="absolute left-3 right-3 z-20 flex items-start justify-between" style={{ top }}>
       <div className="pointer-events-auto inline-flex max-w-[70%] items-center gap-2 rounded-full border border-white/10 bg-[#08111d]/92 px-3 py-1.5 text-[11px] text-slate-200 shadow-lg backdrop-blur">
         <span className="font-semibold text-white">{title}</span>
         <span className="truncate text-slate-400">{description}</span>
-      </div>
-      {showSettings ? (
-        <button
-          className="pointer-events-auto rounded-full border border-white/10 bg-[#08111d]/92 px-3 py-1.5 text-[11px] font-medium text-slate-200 shadow-lg transition hover:border-sky-400/50 hover:text-white"
-          type="button"
-          onClick={onSettings}
-        >
-          设置
-        </button>
-      ) : null}
-    </div>
-  )
-}
-
-function IndicatorSettingsPanel({
-  panel,
-  draftSettings,
-  draftIndicatorStyleSettings,
-  settingsTab,
-  error,
-  onChange,
-  onChangeStyle,
-  onApply,
-  onClose,
-  onReset,
-  onResetStyle,
-  onSelectTab,
-}: {
-  panel: Exclude<SettingsPanelKey, null>
-  draftSettings: IndicatorSettings
-  draftIndicatorStyleSettings: IndicatorStyleSettings
-  settingsTab: SettingsTabKey
-  error: string | null
-  onChange: Dispatch<SetStateAction<IndicatorSettings>>
-  onChangeStyle: Dispatch<SetStateAction<IndicatorStyleSettings>>
-  onApply: () => void
-  onClose: () => void
-  onReset: () => void
-  onResetStyle: () => void
-  onSelectTab: (tab: SettingsTabKey) => void
-}) {
-  const supportsInputs = panel !== 'volume'
-  const supportsStyle = true
-  return (
-    <div className="w-[24rem] rounded-[24px] border border-white/10 bg-[#07101b]/95 p-4 shadow-2xl backdrop-blur">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Indicator Settings</p>
-          <h3 className="mt-2 text-base font-semibold text-white">{panelTitle(panel)}</h3>
-        </div>
-        <button
-          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-400 hover:text-white"
-          type="button"
-          onClick={onClose}
-        >
-          关闭
-        </button>
-      </div>
-
-      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/8 bg-white/5 p-1">
-        {supportsInputs ? (
-          <button
-            className={cx(
-              'rounded-xl px-3 py-2 text-sm transition',
-              settingsTab === 'inputs' ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
-            )}
-            type="button"
-            onClick={() => onSelectTab('inputs')}
-          >
-            Inputs
-          </button>
-        ) : null}
-        {supportsStyle ? (
-          <button
-            className={cx(
-              'rounded-xl px-3 py-2 text-sm transition',
-              settingsTab === 'style' ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
-            )}
-            type="button"
-            onClick={() => onSelectTab('style')}
-          >
-            Style
-          </button>
-        ) : null}
-      </div>
-
-      <div className="mt-4 space-y-3">
-        {settingsTab === 'inputs' && panel === 'ema' ? (
-          <>
-            <NumericField
-              label="EMA 周期"
-              step={1}
-              value={draftSettings.ema.period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  ema: { ...current.ema, period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'style' && panel === 'ema' ? (
-          <>
-            <ColorField
-              label="线条颜色"
-              value={draftIndicatorStyleSettings.ema.color}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  ema: { ...current.ema, color: value },
-                }))
-              }
-            />
-            <NumericField
-              label="线宽"
-              step={1}
-              value={draftIndicatorStyleSettings.ema.lineWidth}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  ema: { ...current.ema, lineWidth: clampInteger(value, 1, 6) },
-                }))
-              }
-            />
-            <LineStyleField
-              label="线型"
-              value={draftIndicatorStyleSettings.ema.lineStyle}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  ema: { ...current.ema, lineStyle: value },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'inputs' && panel === 'bollinger' ? (
-          <>
-            <NumericField
-              label="布林周期"
-              step={1}
-              value={draftSettings.bollinger.period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-            <NumericField
-              label="标准差倍数"
-              step={0.1}
-              value={draftSettings.bollinger.std_dev}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, std_dev: clampFloat(value, 0.1, 10) },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'style' && panel === 'bollinger' ? (
-          <>
-            <ColorField
-              label="上轨颜色"
-              value={draftIndicatorStyleSettings.bollinger.upperColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, upperColor: value },
-                }))
-              }
-            />
-            <ColorField
-              label="中轨颜色"
-              value={draftIndicatorStyleSettings.bollinger.middleColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, middleColor: value },
-                }))
-              }
-            />
-            <ColorField
-              label="下轨颜色"
-              value={draftIndicatorStyleSettings.bollinger.lowerColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, lowerColor: value },
-                }))
-              }
-            />
-            <NumericField
-              label="线宽"
-              step={1}
-              value={draftIndicatorStyleSettings.bollinger.lineWidth}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, lineWidth: clampInteger(value, 1, 6) },
-                }))
-              }
-            />
-            <LineStyleField
-              label="线型"
-              value={draftIndicatorStyleSettings.bollinger.lineStyle}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  bollinger: { ...current.bollinger, lineStyle: value },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'style' && panel === 'volume' ? (
-          <>
-            <ColorField
-              label="上涨量柱颜色"
-              value={draftIndicatorStyleSettings.volume.upColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  volume: { ...current.volume, upColor: value },
-                }))
-              }
-            />
-            <ColorField
-              label="下跌量柱颜色"
-              value={draftIndicatorStyleSettings.volume.downColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  volume: { ...current.volume, downColor: value },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'inputs' && panel === 'rsi' ? (
-          <>
-            <NumericField
-              label="RSI 周期"
-              step={1}
-              value={draftSettings.rsi.period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'style' && panel === 'rsi' ? (
-          <>
-            <ColorField
-              label="线条颜色"
-              value={draftIndicatorStyleSettings.rsi.color}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, color: value },
-                }))
-              }
-            />
-            <NumericField
-              label="线宽"
-              step={1}
-              value={draftIndicatorStyleSettings.rsi.lineWidth}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, lineWidth: clampInteger(value, 1, 6) },
-                }))
-              }
-            />
-            <LineStyleField
-              label="线型"
-              value={draftIndicatorStyleSettings.rsi.lineStyle}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, lineStyle: value },
-                }))
-              }
-            />
-            <NumericField
-              label="上阈值"
-              step={1}
-              value={draftIndicatorStyleSettings.rsi.upperLevel}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, upperLevel: clampInteger(value, 1, 100) },
-                }))
-              }
-            />
-            <NumericField
-              label="下阈值"
-              step={1}
-              value={draftIndicatorStyleSettings.rsi.lowerLevel}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, lowerLevel: clampInteger(value, 1, 100) },
-                }))
-              }
-            />
-            <ColorField
-              label="阈值线颜色"
-              value={draftIndicatorStyleSettings.rsi.levelColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, levelColor: value },
-                }))
-              }
-            />
-            <LineStyleField
-              label="阈值线线型"
-              value={draftIndicatorStyleSettings.rsi.levelLineStyle}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  rsi: { ...current.rsi, levelLineStyle: value },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'inputs' && panel === 'macd' ? (
-          <>
-            <NumericField
-              label="快线周期"
-              step={1}
-              value={draftSettings.macd.fast_period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  macd: { ...current.macd, fast_period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-            <NumericField
-              label="慢线周期"
-              step={1}
-              value={draftSettings.macd.slow_period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  macd: { ...current.macd, slow_period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-            <NumericField
-              label="信号线周期"
-              step={1}
-              value={draftSettings.macd.signal_period}
-              onChange={(value) =>
-                onChange((current) => ({
-                  ...current,
-                  macd: { ...current.macd, signal_period: clampInteger(value, 1, 500) },
-                }))
-              }
-            />
-          </>
-        ) : null}
-
-        {settingsTab === 'style' && panel === 'macd' ? (
-          <>
-            <ColorField
-              label="MACD 线颜色"
-              value={draftIndicatorStyleSettings.macd.macdColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, macdColor: value },
-                }))
-              }
-            />
-            <ColorField
-              label="信号线颜色"
-              value={draftIndicatorStyleSettings.macd.signalColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, signalColor: value },
-                }))
-              }
-            />
-            <NumericField
-              label="线宽"
-              step={1}
-              value={draftIndicatorStyleSettings.macd.lineWidth}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, lineWidth: clampInteger(value, 1, 6) },
-                }))
-              }
-            />
-            <LineStyleField
-              label="线型"
-              value={draftIndicatorStyleSettings.macd.lineStyle}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, lineStyle: value },
-                }))
-              }
-            />
-            <ColorField
-              label="正柱颜色"
-              value={draftIndicatorStyleSettings.macd.positiveColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, positiveColor: value },
-                }))
-              }
-            />
-            <ColorField
-              label="负柱颜色"
-              value={draftIndicatorStyleSettings.macd.negativeColor}
-              onChange={(value) =>
-                onChangeStyle((current) => ({
-                  ...current,
-                  macd: { ...current.macd, negativeColor: value },
-                }))
-              }
-            />
-          </>
-        ) : null}
-      </div>
-
-      <div className="mt-4 rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-xs text-slate-400">
-        {panelDescription(panel, draftSettings)}
-      </div>
-
-      {error ? (
-        <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <button
-          className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white"
-          type="button"
-          onClick={() => {
-            onReset()
-            onResetStyle()
-          }}
-        >
-          恢复默认
-        </button>
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white"
-            type="button"
-            onClick={onClose}
-          >
-            取消
-          </button>
-          <button
-            className="rounded-full bg-sky-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-600"
-            disabled={Boolean(error)}
-            type="button"
-            onClick={onApply}
-          >
-            应用
-          </button>
-        </div>
       </div>
     </div>
   )
@@ -2184,6 +1653,7 @@ function DrawingObjectSettingsPanel({
   onDelete,
   onSelectTab,
   onUpdate,
+  compact = false,
 }: {
   drawing: DrawingObject
   tab: DrawingSettingsTab
@@ -2191,6 +1661,7 @@ function DrawingObjectSettingsPanel({
   onDelete: () => void
   onSelectTab: (tab: DrawingSettingsTab) => void
   onUpdate: (updater: (drawing: DrawingObject) => DrawingObject) => void
+  compact?: boolean
 }) {
   const updateSettings = (updater: (settings: DrawingSettings) => DrawingSettings) => {
     onUpdate((current) => ({
@@ -2203,14 +1674,26 @@ function DrawingObjectSettingsPanel({
     drawing.tool === 'trendline' || drawing.tool === 'parallelChannel' || drawing.tool === 'ray' || drawing.tool === 'extendedLine'
 
   return (
-    <div className="pointer-events-auto w-[25rem] rounded-[24px] border border-white/10 bg-[#07101b]/96 p-4 shadow-2xl backdrop-blur">
+    <div
+      className={cx(
+        'pointer-events-auto border border-white/10 bg-[#07101b]/96 shadow-2xl backdrop-blur',
+        compact
+          ? 'max-h-[24rem] w-[20rem] overflow-y-auto rounded-[18px] p-3'
+          : 'w-[25rem] rounded-[24px] p-4',
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Drawing Settings</p>
-          <h3 className="mt-2 text-base font-semibold text-white">{drawingToolLabel(drawing.tool)}</h3>
+          <h3 className={cx('font-semibold text-white', compact ? 'mt-1 text-sm' : 'mt-2 text-base')}>
+            {drawingToolLabel(drawing.tool)}
+          </h3>
         </div>
         <button
-          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-400 hover:text-white"
+          className={cx(
+            'rounded-full border border-white/10 text-xs text-slate-300 transition hover:border-slate-400 hover:text-white',
+            compact ? 'px-2.5 py-1' : 'px-3 py-1',
+          )}
           type="button"
           onClick={onClose}
         >
@@ -2218,12 +1701,13 @@ function DrawingObjectSettingsPanel({
         </button>
       </div>
 
-      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/8 bg-white/5 p-1">
+      <div className={cx('flex items-center gap-2 rounded-2xl border border-white/8 bg-white/5 p-1', compact ? 'mt-3' : 'mt-4')}>
         {(['style', 'text', 'coordinates', 'visibility'] as DrawingSettingsTab[]).map((item) => (
           <button
             key={item}
             className={cx(
-              'rounded-xl px-3 py-2 text-sm capitalize transition',
+              'rounded-xl capitalize transition',
+              compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
               tab === item ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
             )}
             type="button"
@@ -2234,7 +1718,7 @@ function DrawingObjectSettingsPanel({
         ))}
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div className={cx('space-y-3', compact ? 'mt-3' : 'mt-4')}>
         {tab === 'style' ? (
           <>
             <ColorField
@@ -2463,16 +1947,22 @@ function DrawingObjectSettingsPanel({
         ) : null}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className={cx('flex items-center justify-between gap-3', compact ? 'mt-3' : 'mt-4')}>
         <button
-          className="rounded-full border border-rose-400/20 px-3 py-2 text-sm text-rose-200 transition hover:border-rose-400/50"
+          className={cx(
+            'rounded-full border border-rose-400/20 text-rose-200 transition hover:border-rose-400/50',
+            compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
+          )}
           type="button"
           onClick={onDelete}
         >
           删除
         </button>
         <button
-          className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white"
+          className={cx(
+            'rounded-full border border-white/10 text-slate-300 transition hover:border-slate-400 hover:text-white',
+            compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
+          )}
           type="button"
           onClick={onClose}
         >
@@ -2618,6 +2108,8 @@ function handleDrawingMouseDown({
   setDrawings,
   setOverlayRevision,
   setSelectedDrawingId,
+  setDrawingSettingsOpen,
+  setDrawingTool,
   dragStateRef,
 }: {
   chartRefs: MutableRefObject<ChartRefs | null>
@@ -2629,6 +2121,8 @@ function handleDrawingMouseDown({
   setDrawings: Dispatch<SetStateAction<DrawingObject[]>>
   setOverlayRevision: Dispatch<SetStateAction<number>>
   setSelectedDrawingId: Dispatch<SetStateAction<string | null>>
+  setDrawingSettingsOpen: Dispatch<SetStateAction<boolean>>
+  setDrawingTool: Dispatch<SetStateAction<DrawingTool>>
   dragStateRef: MutableRefObject<DragState | null>
 }) {
   return (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -2643,12 +2137,14 @@ function handleDrawingMouseDown({
     if (drawingTool === 'select') {
       const hit = hitTestDrawings(drawings, chartRefs.current, point.x, point.y, pricePaneHeight)
       setSelectedDrawingId(hit?.id ?? null)
+      setDrawingSettingsOpen(Boolean(hit))
       if (hit) {
         dragStateRef.current = {
           drawingId: hit.id,
           startX: point.x,
           startY: point.y,
           originalPoints: hit.source.points,
+          handleIndex: null,
         }
       }
       return
@@ -2662,6 +2158,8 @@ function handleDrawingMouseDown({
       const nextDrawing = createDrawingObject('horizontalLine', [point.data, point.data])
       setDrawings((current) => [...current, nextDrawing])
       setSelectedDrawingId(nextDrawing.id)
+      setDrawingSettingsOpen(true)
+      setDrawingTool('cursor')
       setOverlayRevision((current) => current + 1)
       return
     }
@@ -2670,6 +2168,8 @@ function handleDrawingMouseDown({
       const nextDrawing = createDrawingObject('verticalLine', [point.data, point.data])
       setDrawings((current) => [...current, nextDrawing])
       setSelectedDrawingId(nextDrawing.id)
+      setDrawingSettingsOpen(true)
+      setDrawingTool('cursor')
       setOverlayRevision((current) => current + 1)
       return
     }
@@ -2698,6 +2198,8 @@ function handleDrawingMouseDown({
       const nextDrawing = createDrawingObject(current.tool, points)
       setDrawings((items) => [...items, nextDrawing])
       setSelectedDrawingId(nextDrawing.id)
+      setDrawingSettingsOpen(true)
+      setDrawingTool('cursor')
       return null
     })
   }
@@ -2772,12 +2274,22 @@ function resolveDrawingPoint(
   container: HTMLDivElement | null,
   pricePaneHeight: number,
 ) {
+  return resolveDrawingPointFromClient(event.clientX, event.clientY, refs, container, pricePaneHeight)
+}
+
+function resolveDrawingPointFromClient(
+  clientX: number,
+  clientY: number,
+  refs: ChartRefs | null,
+  container: HTMLDivElement | null,
+  pricePaneHeight: number,
+) {
   if (!refs || !container) {
     return null
   }
   const rect = container.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
+  const x = clientX - rect.left
+  const y = clientY - rect.top
   if (x < 0 || y < 0 || y > pricePaneHeight) {
     return null
   }
@@ -3410,29 +2922,67 @@ function syncChartMetrics(
   }
 }
 
-function buildMarkers(positions: PositionRecord[]): SeriesMarker<UTCTimestamp>[] {
+function buildMarkers(positions: PositionRecord[], candleTimes: number[]): SeriesMarker<UTCTimestamp>[] {
   return positions.flatMap((position, index) => {
+    const openMarkerTime = alignMarkerTime(position.open_time, candleTimes)
     const openMarker: SeriesMarker<UTCTimestamp> = {
-      time: toUtcTime(position.open_time),
+      time: toUtcTime(openMarkerTime),
       position: position.side === 'long' ? 'belowBar' : 'aboveBar',
       shape: position.side === 'long' ? 'arrowUp' : 'arrowDown',
       color: position.side === 'long' ? '#22c55e' : '#ef4444',
-      text: `#${index + 1} Open`,
+      text: `#${index + 1} 开仓`,
     }
     const closeMarkers =
       position.close_time === null
         ? []
         : [
             {
-              time: toUtcTime(position.close_time),
+              time: toUtcTime(alignMarkerTime(position.close_time, candleTimes)),
               position: position.side === 'long' ? 'aboveBar' : 'belowBar',
               shape: 'circle',
               color: position.is_profit ? '#22c55e' : '#ef4444',
-              text: `#${index + 1} Close`,
+              text: `#${index + 1} 平仓`,
             } satisfies SeriesMarker<UTCTimestamp>,
           ]
     return [openMarker, ...closeMarkers]
   })
+}
+
+function buildMarkerPositionIndex(positions: PositionRecord[], candleTimes: number[]) {
+  const index = new Map<number, string>()
+  positions.forEach((position) => {
+    index.set(alignMarkerTime(position.open_time, candleTimes), position.position_id)
+    if (position.close_time !== null) {
+      index.set(alignMarkerTime(position.close_time, candleTimes), position.position_id)
+    }
+  })
+  return index
+}
+
+function alignMarkerTime(targetTime: number, candleTimes: number[]) {
+  if (candleTimes.length === 0) {
+    return targetTime
+  }
+  if (targetTime <= candleTimes[0]) {
+    return candleTimes[0]
+  }
+  const lastTime = candleTimes[candleTimes.length - 1]
+  if (targetTime >= lastTime) {
+    return lastTime
+  }
+
+  for (let index = 0; index < candleTimes.length; index += 1) {
+    const current = candleTimes[index]
+    if (current >= targetTime) {
+      if (index === 0) {
+        return current
+      }
+      const previous = candleTimes[index - 1]
+      return Math.abs(current - targetTime) < Math.abs(targetTime - previous) ? current : previous
+    }
+  }
+
+  return lastTime
 }
 
 function toUtcTime(time: number) {
@@ -3480,12 +3030,11 @@ function formatEpoch(time: number) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
     hour12: false,
   })
   const parts = formatter.formatToParts(new Date(time * 1000))
   const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${partMap.weekday ?? ''} ${partMap.year ?? '----'}-${partMap.month ?? '--'}-${partMap.day ?? '--'} ${partMap.hour ?? '--'}:${partMap.minute ?? '--'}:${partMap.second ?? '--'} 北京时间`
+  return `${partMap.weekday ?? ''} ${partMap.year ?? '----'}-${partMap.month ?? '--'}-${partMap.day ?? '--'} ${partMap.hour ?? '--'}:${partMap.minute ?? '--'}`
 }
 
 function formatSignedNumber(value: number, digits = 2) {
@@ -3511,6 +3060,20 @@ function lineStyleToDashArray(style: LineStyle) {
     return '2 5'
   }
   return undefined
+}
+
+function nextLineStyle(style: LineStyle) {
+  if (style === LineStyle.Solid) {
+    return LineStyle.Dashed
+  }
+  if (style === LineStyle.Dashed) {
+    return LineStyle.Dotted
+  }
+  return LineStyle.Solid
+}
+
+function nextLineWidth(width: number) {
+  return width >= 5 ? 1 : width + 1
 }
 
 function applyAlpha(value: string, opacity: number) {
@@ -3594,7 +3157,7 @@ function buildLegend(
     low: formatNumber(candle.low),
     close: formatNumber(candle.close),
     volume: formatCompactNumber(findValueAtTime(chartData.volume, time, dataIndexes?.volume), 2),
-    ema: formatNumber(findValueAtTime(chartData.ema20, time, dataIndexes?.ema20)),
+    ema: formatEmaLegend(chartData, dataIndexes, time),
     rsi: formatNumber(findValueAtTime(chartData.rsi, time, dataIndexes?.rsi)),
     macd: formatNumber(findValueAtTime(chartData.macd, time, dataIndexes?.macd)),
     signal: formatNumber(findValueAtTime(chartData.signal, time, dataIndexes?.signal)),
@@ -3609,13 +3172,44 @@ function buildDataIndexes(chartData?: ChartPayload) {
     return null
   }
 
+  const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
+
   return {
     volume: new Map(chartData.volume.map((row) => [row.time, row.volume])),
-    ema20: new Map(chartData.ema20.map((row) => [row.time, row.value])),
+    ema: new Map(
+      emaSeriesList.map((series) => [
+        series.period,
+        new Map(series.data.map((row) => [row.time, row.value])),
+      ]),
+    ),
     rsi: new Map(chartData.rsi.map((row) => [row.time, row.value])),
     macd: new Map(chartData.macd.map((row) => [row.time, row.value])),
     signal: new Map(chartData.signal.map((row) => [row.time, row.value])),
   }
+}
+
+function formatEmaLegend(
+  chartData: ChartPayload,
+  dataIndexes: ReturnType<typeof buildDataIndexes>,
+  time: number,
+) {
+  const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
+  if (!emaSeriesList.length) {
+    return '--'
+  }
+
+  const items = emaSeriesList
+    .map((series) => {
+      const seriesIndex = dataIndexes?.ema.get(series.period)
+      const value = findValueAtTime(series.data, time, seriesIndex)
+      if (value === null || value === undefined) {
+        return null
+      }
+      return `${series.period}: ${formatNumber(value)}`
+    })
+    .filter(Boolean)
+
+  return items.length > 0 ? items.join('  ') : '--'
 }
 
 function updateLegendState(
@@ -3648,7 +3242,7 @@ function normalizeClickedTime(time: unknown) {
   return null
 }
 
-function findNearestPositionByTime(positions: PositionRecord[], clickedTime: number) {
+function findNearestPositionByTime(positions: PositionRecord[], clickedTime: number, maxDeltaSeconds = 2 * 60 * 60) {
   if (positions.length === 0) {
     return null
   }
@@ -3661,7 +3255,7 @@ function findNearestPositionByTime(positions: PositionRecord[], clickedTime: num
       position.close_time === null ? Number.POSITIVE_INFINITY : Math.abs(position.close_time - clickedTime),
     ]
     const delta = Math.min(...deltas)
-    if (delta < minDelta && delta <= 2 * 60 * 60) {
+    if (delta < minDelta && delta <= maxDeltaSeconds) {
       minDelta = delta
       nearest = position
     }
@@ -3690,9 +3284,9 @@ function buildPaneOverlays(indicators: IndicatorState, indicatorSettings: Indica
 }
 
 function buildPaneWeights(indicators: IndicatorState) {
-  const panes: Array<{ key: 'price' | 'ema' | 'bollinger' | 'volume' | 'rsi' | 'macd'; weight: number }> = []
+  const panes: Array<{ key: 'price' | 'ema' | 'volume' | 'rsi' | 'macd'; weight: number }> = []
   panes.push({
-    key: indicators.showEma ? 'ema' : indicators.showBollinger ? 'bollinger' : 'price',
+    key: indicators.showEma ? 'ema' : 'price',
     weight: 0.62,
   })
   if (indicators.showVolume) {
@@ -3708,21 +3302,14 @@ function buildPaneWeights(indicators: IndicatorState) {
 }
 
 function paneTitle(
-  key: 'price' | 'ema' | 'bollinger' | 'volume' | 'rsi' | 'macd',
+  key: 'price' | 'ema' | 'volume' | 'rsi' | 'macd',
   indicatorSettings: IndicatorSettings,
 ) {
   if (key === 'price') {
     return 'PRICE'
   }
-  if (key === 'ema' && indicatorSettings.ema) {
-    const parts = [`EMA(${indicatorSettings.ema.period})`]
-    if (indicatorSettings.bollinger) {
-      parts.push(`BOLL(${indicatorSettings.bollinger.period}, ${indicatorSettings.bollinger.std_dev})`)
-    }
-    return parts.join('  ')
-  }
-  if (key === 'bollinger') {
-    return `BOLL(${indicatorSettings.bollinger.period}, ${indicatorSettings.bollinger.std_dev})`
+  if (key === 'ema') {
+    return `EMA(${indicatorSettings.ema.periods.join(', ')})`
   }
   if (key === 'volume') {
     return 'VOL'
@@ -3734,17 +3321,14 @@ function paneTitle(
 }
 
 function paneDescription(
-  key: 'price' | 'ema' | 'bollinger' | 'volume' | 'rsi' | 'macd',
+  key: 'price' | 'ema' | 'volume' | 'rsi' | 'macd',
   indicatorSettings: IndicatorSettings,
 ) {
   if (key === 'price') {
     return '主图 K 线'
   }
   if (key === 'ema') {
-    return '主图均线与布林带参数'
-  }
-  if (key === 'bollinger') {
-    return `周期 ${indicatorSettings.bollinger.period} / 倍数 ${indicatorSettings.bollinger.std_dev}`
+    return `周期 ${indicatorSettings.ema.periods.join(' / ')}`
   }
   if (key === 'volume') {
     return '成交量副图'
@@ -3755,66 +3339,11 @@ function paneDescription(
   return `快 ${indicatorSettings.macd.fast_period} / 慢 ${indicatorSettings.macd.slow_period} / 信号 ${indicatorSettings.macd.signal_period}`
 }
 
-function panelTitle(panel: Exclude<SettingsPanelKey, null>) {
-  if (panel === 'ema') {
-    return 'EMA 参数'
-  }
-  if (panel === 'bollinger') {
-    return '布林带参数'
-  }
-  if (panel === 'volume') {
-    return '成交量样式'
-  }
-  if (panel === 'rsi') {
-    return 'RSI 参数'
-  }
-  return 'MACD 参数'
-}
-
-function panelDescription(panel: Exclude<SettingsPanelKey, null>, settings: IndicatorSettings) {
-  if (panel === 'ema') {
-    return `当前使用 EMA(${settings.ema.period})，主图会同步刷新均线位置。`
-  }
-  if (panel === 'bollinger') {
-    return `当前使用 BOLL(${settings.bollinger.period}, ${settings.bollinger.std_dev})，会同步刷新上下轨和中轨。`
-  }
-  if (panel === 'volume') {
-    return '成交量没有计算输入，但可以调整上涨/下跌量柱颜色。'
-  }
-  if (panel === 'rsi') {
-    return `当前使用 RSI(${settings.rsi.period})，适合观察超买超卖节奏。`
-  }
-  return `当前使用 MACD(${settings.macd.fast_period}, ${settings.macd.slow_period}, ${settings.macd.signal_period})。`
-}
-
-function validateIndicatorSettings(settings: IndicatorSettings) {
-  if (settings.ema.period < 1) {
-    return 'EMA 周期必须大于 0'
-  }
-  if (settings.bollinger.period < 1 || settings.bollinger.std_dev <= 0) {
-    return '布林带周期和标准差倍数都必须大于 0'
-  }
-  if (settings.rsi.period < 1) {
-    return 'RSI 周期必须大于 0'
-  }
-  if (settings.macd.fast_period >= settings.macd.slow_period) {
-    return 'MACD 快线周期必须小于慢线周期'
-  }
-  if (settings.macd.signal_period < 1) {
-    return 'MACD 信号线周期必须大于 0'
-  }
-  return null
-}
-
 function clampInteger(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) {
     return min
   }
   return Math.min(max, Math.max(min, Math.round(value)))
-}
-
-function toLineWidth(value: number) {
-  return clampInteger(value, 1, 4) as 1 | 2 | 3 | 4
 }
 
 function clampFloat(value: number, min: number, max: number) {

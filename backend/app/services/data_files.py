@@ -51,30 +51,83 @@ def get_latest_data_file() -> Path | None:
     return Path(files[0]["path"])
 
 
-def load_symbols_from_csv(csv_file_path: str | Path, min_trades: int | None = None) -> dict[str, int]:
+def load_symbols_from_csv(csv_file_path: str | Path, min_trades: int | None = None) -> list[dict]:
     min_trades = settings.chart_min_trades if min_trades is None else min_trades
     path = Path(csv_file_path)
     if not path.exists():
         logger.error("CSV文件不存在: %s", path)
-        return {}
+        return []
 
     try:
         df = pd.read_csv(path)
         required_columns = {"交易对", "交易次数"}
         if not required_columns.issubset(df.columns):
             logger.error("CSV文件缺少必要的列: %s", sorted(required_columns))
-            return {}
+            return []
 
-        symbol_counts: dict[str, int] = {}
-        for _, row in df.iterrows():
-            symbol = row["交易对"]
-            symbol_counts[symbol] = symbol_counts.get(symbol, 0) + int(row["交易次数"])
+        rows: list[dict] = []
+        for symbol, group in df.groupby("交易对"):
+            trade_count = int(pd.to_numeric(group["交易次数"], errors="coerce").fillna(0).sum())
+            if trade_count < min_trades:
+                continue
 
-        filtered = {symbol: count for symbol, count in symbol_counts.items() if count >= min_trades}
-        return dict(sorted(filtered.items(), key=lambda item: item[1], reverse=True))
+            open_times = _extract_csv_timestamps(group, "原始开仓时间戳", "开仓时间")
+            close_times = _extract_csv_timestamps(group, "原始平仓时间戳", "平仓时间")
+            symbol_times = [*open_times, *close_times]
+            first_trade_date = datetime.fromtimestamp(min(symbol_times)).date().isoformat() if symbol_times else None
+            last_trade_date = datetime.fromtimestamp(max(symbol_times)).date().isoformat() if symbol_times else None
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_count": trade_count,
+                    "first_trade_date": first_trade_date,
+                    "last_trade_date": last_trade_date,
+                }
+            )
+
+        return sorted(rows, key=lambda item: item["trade_count"], reverse=True)
     except Exception as exc:
         logger.exception("读取CSV文件失败: %s", exc)
-        return {}
+        return []
+
+
+def get_csv_date_range(csv_file_path: str | Path) -> dict[str, str] | None:
+    path = Path(csv_file_path)
+    if not path.exists():
+        logger.error("CSV文件不存在: %s", path)
+        return None
+
+    try:
+        df = pd.read_csv(path)
+        if df.empty:
+            return None
+
+        open_times = _extract_csv_timestamps(df, "原始开仓时间戳", "开仓时间")
+        close_times = _extract_csv_timestamps(df, "原始平仓时间戳", "平仓时间")
+        all_times = [*open_times, *close_times]
+        if not all_times:
+            return None
+
+        start = datetime.fromtimestamp(min(all_times)).date().isoformat()
+        end = datetime.fromtimestamp(max(all_times)).date().isoformat()
+        return {
+            "start_date": start,
+            "end_date": end,
+        }
+    except Exception as exc:
+        logger.exception("读取CSV日期范围失败: %s", exc)
+        return None
+
+
+def _extract_csv_timestamps(df: pd.DataFrame, raw_column: str, text_column: str) -> list[int]:
+    timestamps: list[int] = []
+    if raw_column in df.columns:
+        raw_series = pd.to_numeric(df[raw_column], errors="coerce").dropna()
+        timestamps.extend((raw_series.astype("int64") // 1000).tolist())
+    elif text_column in df.columns:
+        parsed_series = pd.to_datetime(df[text_column], errors="coerce").dropna()
+        timestamps.extend(((parsed_series - pd.Timedelta(hours=8)).astype("int64") // 10**9).tolist())
+    return timestamps
 
 
 def load_positions_from_csv(

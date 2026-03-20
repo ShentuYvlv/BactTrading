@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 
 from backend.app.services.data_files import (
+    get_csv_date_range,
     get_data_files,
     get_latest_data_file,
     load_symbols_from_csv,
@@ -29,16 +30,10 @@ def list_symbols(
     if path is None:
         return {"items": [], "total": 0}
 
-    symbol_counts = load_symbols_from_csv(path, min_trades=min_trades)
-    items = [
-        {
-            "symbol": symbol,
-            "trade_count": trade_count,
-        }
-        for symbol, trade_count in symbol_counts.items()
-    ]
+    items = load_symbols_from_csv(path, min_trades=min_trades)
     return {
         "items": items,
         "total": len(items),
         "data_file": str(path),
+        "date_range": get_csv_date_range(path),
     }
