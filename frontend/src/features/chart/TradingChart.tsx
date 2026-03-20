@@ -3,6 +3,7 @@ import {
   ColorType,
   CrosshairMode,
   HistogramSeries,
+  LineStyle,
   LineSeries,
   createSeriesMarkers,
   createChart,
@@ -16,6 +17,7 @@ import {
   ChevronDown,
   Clock3,
   Crosshair,
+  Eye,
   Minus,
   MousePointer2,
   PanelLeftClose,
@@ -24,6 +26,7 @@ import {
   RefreshCcw,
   Search,
   Slash,
+  SlidersHorizontal,
   Square,
   Trash2,
   TrendingUp,
@@ -49,6 +52,8 @@ interface TradingChartProps {
   selectedPositionId: string | null
   timeframe: string
   timeframeOptions: Array<{ label: string; value: string }>
+  isLoading?: boolean
+  loadingLabel?: string
   onSelectPosition: (positionId: string) => void
   onLoadMore: () => void
   onTimeframeShortcut: (timeframe: string) => void
@@ -77,17 +82,55 @@ interface ChartRefs {
   candleSeries: ISeriesApi<'Candlestick'>
 }
 
-type SettingsPanelKey = 'ema' | 'bollinger' | 'rsi' | 'macd' | null
-type DrawingTool = 'cursor' | 'select' | 'trendline' | 'arrow' | 'ray' | 'extendedLine' | 'horizontalLine' | 'verticalLine' | 'rectangle'
+type SettingsPanelKey = 'ema' | 'bollinger' | 'volume' | 'rsi' | 'macd' | null
+type SettingsTabKey = 'inputs' | 'style'
+type DrawingTool =
+  | 'cursor'
+  | 'select'
+  | 'trendline'
+  | 'parallelChannel'
+  | 'fibRetracement'
+  | 'arrow'
+  | 'ray'
+  | 'extendedLine'
+  | 'horizontalLine'
+  | 'verticalLine'
+  | 'rectangle'
 type DrawingPoint = { time: number; price: number }
+type DrawingSettingsTab = 'style' | 'text' | 'coordinates' | 'visibility'
+type DrawingStatsPosition = 'left' | 'right'
+type DrawingFibLevel = {
+  value: number
+  color: string
+  visible: boolean
+}
+type DrawingSettings = {
+  lineColor: string
+  lineWidth: number
+  lineStyle: LineStyle
+  fillColor: string
+  fillOpacity: number
+  text: string
+  textColor: string
+  showText: boolean
+  showPriceLabels: boolean
+  showStats: boolean
+  statsPosition: DrawingStatsPosition
+  showMidpoint: boolean
+  visible: boolean
+  extendLeft: boolean
+  extendRight: boolean
+  fibLevels: DrawingFibLevel[]
+}
 type DrawingObject = {
   id: string
   tool: Exclude<DrawingTool, 'cursor' | 'select'>
   points: DrawingPoint[]
+  settings: DrawingSettings
 }
 type DrawingDraft = {
   tool: Exclude<DrawingTool, 'cursor' | 'select'>
-  start: DrawingPoint
+  points: DrawingPoint[]
   current: DrawingPoint
 }
 type DragState = {
@@ -95,6 +138,42 @@ type DragState = {
   startX: number
   startY: number
   originalPoints: DrawingPoint[]
+}
+
+type IndicatorStyleSettings = {
+  ema: {
+    color: string
+    lineWidth: number
+    lineStyle: LineStyle
+  }
+  bollinger: {
+    upperColor: string
+    middleColor: string
+    lowerColor: string
+    lineWidth: number
+    lineStyle: LineStyle
+  }
+  volume: {
+    upColor: string
+    downColor: string
+  }
+  rsi: {
+    color: string
+    lineWidth: number
+    lineStyle: LineStyle
+    upperLevel: number
+    lowerLevel: number
+    levelColor: string
+    levelLineStyle: LineStyle
+  }
+  macd: {
+    macdColor: string
+    signalColor: string
+    lineWidth: number
+    lineStyle: LineStyle
+    positiveColor: string
+    negativeColor: string
+  }
 }
 
 const QUICK_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
@@ -105,6 +184,50 @@ const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   rsi: { period: 14 },
   macd: { fast_period: 12, slow_period: 26, signal_period: 9 },
 }
+const DEFAULT_INDICATOR_STYLE_SETTINGS: IndicatorStyleSettings = {
+  ema: {
+    color: '#e1d35c',
+    lineWidth: 2,
+    lineStyle: LineStyle.Solid,
+  },
+  bollinger: {
+    upperColor: 'rgba(125, 211, 252, 0.9)',
+    middleColor: 'rgba(148, 163, 184, 0.8)',
+    lowerColor: 'rgba(125, 211, 252, 0.9)',
+    lineWidth: 1,
+    lineStyle: LineStyle.Dashed,
+  },
+  volume: {
+    upColor: 'rgba(34, 197, 94, 0.65)',
+    downColor: 'rgba(239, 68, 68, 0.65)',
+  },
+  rsi: {
+    color: '#facc15',
+    lineWidth: 2,
+    lineStyle: LineStyle.Solid,
+    upperLevel: 70,
+    lowerLevel: 30,
+    levelColor: 'rgba(148, 163, 184, 0.58)',
+    levelLineStyle: LineStyle.Dashed,
+  },
+  macd: {
+    macdColor: '#a78bfa',
+    signalColor: '#fb7185',
+    lineWidth: 2,
+    lineStyle: LineStyle.Solid,
+    positiveColor: 'rgba(34, 197, 94, 0.55)',
+    negativeColor: 'rgba(239, 68, 68, 0.55)',
+  },
+}
+const DEFAULT_FIB_LEVELS: DrawingFibLevel[] = [
+  { value: 0, color: 'rgba(125, 211, 252, 0.88)', visible: true },
+  { value: 0.236, color: 'rgba(94, 234, 212, 0.78)', visible: true },
+  { value: 0.382, color: 'rgba(250, 204, 21, 0.78)', visible: true },
+  { value: 0.5, color: 'rgba(248, 113, 113, 0.78)', visible: true },
+  { value: 0.618, color: 'rgba(96, 165, 250, 0.78)', visible: true },
+  { value: 0.786, color: 'rgba(192, 132, 252, 0.78)', visible: true },
+  { value: 1, color: 'rgba(244, 114, 182, 0.84)', visible: true },
+]
 
 export function TradingChart({
   chartData,
@@ -115,6 +238,8 @@ export function TradingChart({
   selectedPositionId,
   timeframe,
   timeframeOptions,
+  isLoading = false,
+  loadingLabel = '正在加载图表数据...',
   onSelectPosition,
   onLoadMore,
   onTimeframeShortcut,
@@ -130,12 +255,19 @@ export function TradingChart({
   const [panelPosition, setPanelPosition] = useState(DEFAULT_PANEL_POSITION)
   const [jumpValue, setJumpValue] = useState('1')
   const [settingsPanel, setSettingsPanel] = useState<SettingsPanelKey>(null)
+  const [settingsTab, setSettingsTab] = useState<SettingsTabKey>('inputs')
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
   const [draftSettings, setDraftSettings] = useState<IndicatorSettings>(indicatorSettings)
+  const [indicatorStyleSettings, setIndicatorStyleSettings] = useState<IndicatorStyleSettings>(DEFAULT_INDICATOR_STYLE_SETTINGS)
+  const [draftIndicatorStyleSettings, setDraftIndicatorStyleSettings] = useState<IndicatorStyleSettings>(
+    DEFAULT_INDICATOR_STYLE_SETTINGS,
+  )
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('cursor')
   const [drawings, setDrawings] = useState<DrawingObject[]>([])
   const [draftDrawing, setDraftDrawing] = useState<DrawingDraft | null>(null)
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [drawingSettingsOpen, setDrawingSettingsOpen] = useState(false)
+  const [drawingSettingsTab, setDrawingSettingsTab] = useState<DrawingSettingsTab>('style')
   const [overlayRevision, setOverlayRevision] = useState(0)
   const [pricePaneHeight, setPricePaneHeight] = useState(0)
   const dragStateRef = useRef<DragState | null>(null)
@@ -176,20 +308,16 @@ export function TradingChart({
       }),
     [drawings, overlayRevision, pricePaneHeight],
   )
+  const selectedDrawing = useMemo(
+    () => drawings.find((drawing) => drawing.id === selectedDrawingId) ?? null,
+    [drawings, selectedDrawingId],
+  )
   const renderedDraftDrawing = useMemo(() => {
     if (!draftDrawing) {
       return null
     }
-    return projectDrawing(
-      {
-        id: 'draft',
-        tool: draftDrawing.tool,
-        points: [draftDrawing.start, draftDrawing.current],
-      },
-      chartRefs.current,
-      pricePaneHeight,
-      overlayRevision,
-    )
+    const preview = buildDraftDrawingObject(draftDrawing)
+    return preview ? projectDrawing(preview, chartRefs.current, pricePaneHeight, overlayRevision) : null
   }, [draftDrawing, overlayRevision, pricePaneHeight])
 
   useEffect(() => {
@@ -203,6 +331,17 @@ export function TradingChart({
   }, [indicatorSettings])
 
   useEffect(() => {
+    setDraftIndicatorStyleSettings(indicatorStyleSettings)
+  }, [indicatorStyleSettings])
+
+  useEffect(() => {
+    setDrawingSettingsOpen(Boolean(selectedDrawingId))
+    if (!selectedDrawingId) {
+      setDrawingSettingsTab('style')
+    }
+  }, [selectedDrawingId])
+
+  useEffect(() => {
     if (!drawingStorageKey) {
       setDrawings([])
       return
@@ -214,8 +353,8 @@ export function TradingChart({
         setDrawings([])
         return
       }
-      const parsed = JSON.parse(raw) as DrawingObject[]
-      setDrawings(Array.isArray(parsed) ? parsed : [])
+      const parsed = JSON.parse(raw) as unknown[]
+      setDrawings(Array.isArray(parsed) ? parsed.map(normalizeDrawingObject).filter(Boolean) as DrawingObject[] : [])
     } catch {
       setDrawings([])
     }
@@ -303,8 +442,9 @@ export function TradingChart({
       const emaSeries = chart.addSeries(
         LineSeries,
         {
-          color: '#f97316',
-          lineWidth: 2,
+          color: indicatorStyleSettings.ema.color,
+          lineWidth: toLineWidth(indicatorStyleSettings.ema.lineWidth),
+          lineStyle: indicatorStyleSettings.ema.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -317,9 +457,9 @@ export function TradingChart({
       const upper = chart.addSeries(
         LineSeries,
         {
-          color: 'rgba(125, 211, 252, 0.9)',
-          lineWidth: 1,
-          lineStyle: 2,
+          color: indicatorStyleSettings.bollinger.upperColor,
+          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
+          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -328,8 +468,9 @@ export function TradingChart({
       const middle = chart.addSeries(
         LineSeries,
         {
-          color: 'rgba(148, 163, 184, 0.8)',
-          lineWidth: 1,
+          color: indicatorStyleSettings.bollinger.middleColor,
+          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
+          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -338,9 +479,9 @@ export function TradingChart({
       const lower = chart.addSeries(
         LineSeries,
         {
-          color: 'rgba(125, 211, 252, 0.9)',
-          lineWidth: 1,
-          lineStyle: 2,
+          color: indicatorStyleSettings.bollinger.lowerColor,
+          lineWidth: toLineWidth(indicatorStyleSettings.bollinger.lineWidth),
+          lineStyle: indicatorStyleSettings.bollinger.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -369,8 +510,8 @@ export function TradingChart({
           value: item.volume,
           color:
             chartData.candlestick[index]?.close >= chartData.candlestick[index]?.open
-              ? 'rgba(34, 197, 94, 0.65)'
-              : 'rgba(239, 68, 68, 0.65)',
+              ? indicatorStyleSettings.volume.upColor
+              : indicatorStyleSettings.volume.downColor,
         })),
       )
       paneIndex += 1
@@ -380,14 +521,31 @@ export function TradingChart({
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
-          color: '#facc15',
-          lineWidth: 2,
+          color: indicatorStyleSettings.rsi.color,
+          lineWidth: toLineWidth(indicatorStyleSettings.rsi.lineWidth),
+          lineStyle: indicatorStyleSettings.rsi.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
         paneIndex,
       )
       rsiSeries.setData(toLineSeriesData(chartData.rsi))
+      rsiSeries.createPriceLine({
+        price: indicatorStyleSettings.rsi.upperLevel,
+        color: indicatorStyleSettings.rsi.levelColor,
+        lineStyle: indicatorStyleSettings.rsi.levelLineStyle,
+        lineWidth: 1,
+        axisLabelVisible: true,
+        title: 'Upper',
+      })
+      rsiSeries.createPriceLine({
+        price: indicatorStyleSettings.rsi.lowerLevel,
+        color: indicatorStyleSettings.rsi.levelColor,
+        lineStyle: indicatorStyleSettings.rsi.levelLineStyle,
+        lineWidth: 1,
+        axisLabelVisible: true,
+        title: 'Lower',
+      })
       paneIndex += 1
     }
 
@@ -395,8 +553,9 @@ export function TradingChart({
       const macdLine = chart.addSeries(
         LineSeries,
         {
-          color: '#a78bfa',
-          lineWidth: 2,
+          color: indicatorStyleSettings.macd.macdColor,
+          lineWidth: toLineWidth(indicatorStyleSettings.macd.lineWidth),
+          lineStyle: indicatorStyleSettings.macd.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -405,8 +564,9 @@ export function TradingChart({
       const signalLine = chart.addSeries(
         LineSeries,
         {
-          color: '#fb7185',
-          lineWidth: 2,
+          color: indicatorStyleSettings.macd.signalColor,
+          lineWidth: toLineWidth(indicatorStyleSettings.macd.lineWidth),
+          lineStyle: indicatorStyleSettings.macd.lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
         },
@@ -427,7 +587,10 @@ export function TradingChart({
         chartData.histogram.map((item) => ({
           time: toUtcTime(item.time),
           value: item.value,
-          color: item.value >= 0 ? 'rgba(34, 197, 94, 0.55)' : 'rgba(239, 68, 68, 0.55)',
+          color:
+            item.value >= 0
+              ? indicatorStyleSettings.macd.positiveColor
+              : indicatorStyleSettings.macd.negativeColor,
         })),
       )
     }
@@ -543,7 +706,7 @@ export function TradingChart({
       chart.remove()
       chartRefs.current = null
     }
-  }, [chartData, dataIndexes, indicators, onSelectPosition, positions])
+  }, [chartData, dataIndexes, indicatorStyleSettings, indicators, onSelectPosition, positions])
 
   useEffect(() => {
     if (!chartRefs.current || !chartData || !selectedPositionId) {
@@ -594,6 +757,10 @@ export function TradingChart({
         setDrawingTool('select')
       } else if (lowerKey === 'g') {
         setDrawingTool('trendline')
+      } else if (lowerKey === 'c') {
+        setDrawingTool('parallelChannel')
+      } else if (lowerKey === 'k') {
+        setDrawingTool('fibRetracement')
       } else if (lowerKey === 'a') {
         setDrawingTool('arrow')
       } else if (lowerKey === 'r') {
@@ -620,9 +787,11 @@ export function TradingChart({
         setDraftDrawing(null)
         setSelectedDrawingId(null)
         setDrawingTool('cursor')
+        setDrawingSettingsOpen(false)
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
         setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawingId))
         setSelectedDrawingId(null)
+        setDrawingSettingsOpen(false)
       }
     }
 
@@ -641,6 +810,78 @@ export function TradingChart({
     .join(' / ')
   const preferredTimeframes = ['15m', '30m', '1h', '4h', '1d', '1w']
   const visibleTimeframes = timeframeOptions.filter((option) => preferredTimeframes.includes(option.value))
+  const openIndicatorSettings = (panel: Exclude<SettingsPanelKey, null>, tab: SettingsTabKey = 'inputs') => {
+    setSettingsTab(tab)
+    setDraftSettings(indicatorSettings)
+    setDraftIndicatorStyleSettings(indicatorStyleSettings)
+    setSettingsPanel(panel)
+    setIndicatorMenuOpen(false)
+  }
+  const indicatorRows: Array<{
+    key: IndicatorKey
+    label: string
+    active: boolean
+    settingsPanel: Exclude<SettingsPanelKey, null> | null
+    settingsTab: SettingsTabKey
+  }> = [
+    {
+      key: 'showEma',
+      label: `EMA ${indicatorSettings.ema.period}`,
+      active: indicators.showEma,
+      settingsPanel: 'ema',
+      settingsTab: 'inputs',
+    },
+    {
+      key: 'showBollinger',
+      label: `BB ${indicatorSettings.bollinger.period} ${indicatorSettings.bollinger.std_dev}`,
+      active: indicators.showBollinger,
+      settingsPanel: 'bollinger',
+      settingsTab: 'inputs',
+    },
+    {
+      key: 'showVolume',
+      label: 'VOL',
+      active: indicators.showVolume,
+      settingsPanel: 'volume',
+      settingsTab: 'style',
+    },
+    {
+      key: 'showRsi',
+      label: `RSI ${indicatorSettings.rsi.period}`,
+      active: indicators.showRsi,
+      settingsPanel: 'rsi',
+      settingsTab: 'inputs',
+    },
+    {
+      key: 'showMacd',
+      label: `MACD ${indicatorSettings.macd.fast_period}, ${indicatorSettings.macd.slow_period}, ${indicatorSettings.macd.signal_period}`,
+      active: indicators.showMacd,
+      settingsPanel: 'macd',
+      settingsTab: 'inputs',
+    },
+    {
+      key: 'showTradeMarkers',
+      label: '交易标记',
+      active: indicators.showTradeMarkers,
+      settingsPanel: null,
+      settingsTab: 'inputs',
+    },
+  ]
+  const activeIndicatorRows = indicatorRows.filter((row) => row.active)
+  const openRowSettings = (row: { settingsPanel: Exclude<SettingsPanelKey, null> | null; settingsTab: SettingsTabKey }) => {
+    if (!row.settingsPanel) {
+      return null
+    }
+    const panel = row.settingsPanel
+    return () => openIndicatorSettings(panel, row.settingsTab)
+  }
+  const updateSelectedDrawing = (updater: (drawing: DrawingObject) => DrawingObject) => {
+    if (!selectedDrawingId) {
+      return
+    }
+    setDrawings((current) => current.map((drawing) => (drawing.id === selectedDrawingId ? updater(drawing) : drawing)))
+    setOverlayRevision((current) => current + 1)
+  }
 
   return (
     <section className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#0b111b] shadow-panel">
@@ -705,6 +946,7 @@ export function TradingChart({
             {chartSymbol} · {timeframe} · Review Workspace
           </span>
         </div>
+        <span className="text-slate-400">{legend?.time ?? '--'}</span>
         <span className={cx('font-medium', legend?.isUp ? 'text-emerald-400' : 'text-rose-400')}>
           开 {legend?.open ?? '--'} 高 {legend?.high ?? '--'} 低 {legend?.low ?? '--'} 收 {legend?.close ?? '--'} {legend?.delta ?? '--'} ({legend?.deltaPct ?? '--'})
         </span>
@@ -726,13 +968,16 @@ export function TradingChart({
               关闭
             </button>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <IndicatorToggleChip active={indicators.showEma} label="EMA" onClick={() => onIndicatorToggle('showEma')} />
-            <IndicatorToggleChip active={indicators.showBollinger} label="布林带" onClick={() => onIndicatorToggle('showBollinger')} />
-            <IndicatorToggleChip active={indicators.showVolume} label="成交量" onClick={() => onIndicatorToggle('showVolume')} />
-            <IndicatorToggleChip active={indicators.showRsi} label="RSI" onClick={() => onIndicatorToggle('showRsi')} />
-            <IndicatorToggleChip active={indicators.showMacd} label="MACD" onClick={() => onIndicatorToggle('showMacd')} />
-            <IndicatorToggleChip active={indicators.showTradeMarkers} label="交易标记" onClick={() => onIndicatorToggle('showTradeMarkers')} />
+          <div className="mt-3 space-y-2">
+            {indicatorRows.map((row) => (
+              <IndicatorMenuRow
+                key={row.key}
+                active={row.active}
+                label={row.label}
+                onConfigure={openRowSettings(row)}
+                onToggle={() => onIndicatorToggle(row.key)}
+              />
+            ))}
           </div>
         </div>
       ) : null}
@@ -740,6 +985,18 @@ export function TradingChart({
       <div className="px-2 pb-2 pt-2">
         <div className="relative">
           <div ref={chartContainerRef} className="h-[calc(100vh-11.75rem)] min-h-[46rem] w-full overflow-hidden rounded-[20px]" />
+
+          {isLoading ? (
+            <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-[20px] bg-[#07101b]/72 backdrop-blur-[2px]">
+              <div className="flex min-w-[18rem] items-center gap-4 rounded-[22px] border border-white/10 bg-[#08111d]/94 px-5 py-4 shadow-2xl">
+                <div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+                <div>
+                  <p className="text-sm font-medium text-white">{loadingLabel}</p>
+                  <p className="mt-1 text-xs text-slate-400">K线和指标正在同步，请稍等。</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <DrawingToolbar
             activeTool={drawingTool}
@@ -757,20 +1014,112 @@ export function TradingChart({
             }}
           />
 
-          <div className="pointer-events-none absolute inset-0">
-            {paneOverlays.map((overlay) => (
-              <PaneHeader
-                key={overlay.key}
-                description={overlay.description}
-                showSettings={overlay.showSettings}
-                title={overlay.title}
-                top={overlay.top}
-                onSettings={() => {
-                  setDraftSettings(indicatorSettings)
-                  setSettingsPanel(overlay.settingsKey)
+          <div className="pointer-events-none absolute left-[4.75rem] top-4 z-30 flex max-w-[min(36rem,calc(100%-6rem))] flex-col gap-2">
+            {activeIndicatorRows.length > 0 ? (
+              <div className="pointer-events-auto flex flex-col gap-1.5 rounded-[18px] border border-white/8 bg-[#08111d]/68 px-2 py-2 shadow-xl backdrop-blur">
+                {activeIndicatorRows.map((row) => (
+                  <ChartIndicatorRow
+                    key={row.key}
+                    label={row.label}
+                    onConfigure={openRowSettings(row)}
+                    onToggle={() => onIndicatorToggle(row.key)}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {settingsPanel ? (
+              <IndicatorSettingsPanel
+                draftSettings={draftSettings}
+                draftIndicatorStyleSettings={draftIndicatorStyleSettings}
+                error={settingsError}
+                panel={settingsPanel}
+                settingsTab={settingsTab}
+                onApply={() => {
+                  if (settingsError) {
+                    return
+                  }
+                  setIndicatorStyleSettings(draftIndicatorStyleSettings)
+                  onApplyIndicatorSettings(draftSettings)
+                  setSettingsPanel(null)
                 }}
+                onChange={setDraftSettings}
+                onChangeStyle={setDraftIndicatorStyleSettings}
+                onClose={() => setSettingsPanel(null)}
+                onReset={() => setDraftSettings(DEFAULT_INDICATOR_SETTINGS)}
+                onResetStyle={() => setDraftIndicatorStyleSettings(DEFAULT_INDICATOR_STYLE_SETTINGS)}
+                onSelectTab={setSettingsTab}
               />
-            ))}
+            ) : null}
+          </div>
+
+          {selectedDrawing ? (
+            <div className="pointer-events-none absolute right-4 top-4 z-40 flex max-w-[min(26rem,calc(100%-6rem))] flex-col items-end gap-2">
+              <div className="pointer-events-auto inline-flex items-center gap-2 rounded-[18px] border border-white/10 bg-[#08111d]/92 px-3 py-2 shadow-xl backdrop-blur">
+                <span className="max-w-[12rem] truncate text-sm font-medium text-white">{drawingToolLabel(selectedDrawing.tool)}</span>
+                <button
+                  className={cx(
+                    'inline-flex h-9 w-9 items-center justify-center rounded-xl border text-slate-300 transition hover:text-white',
+                    drawingSettingsOpen ? 'border-sky-400/60 bg-sky-500/15' : 'border-white/8 bg-white/4 hover:border-slate-400',
+                  )}
+                  title="对象设置"
+                  type="button"
+                  onClick={() => setDrawingSettingsOpen((current) => !current)}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                </button>
+                <button
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/8 text-rose-200 transition hover:border-rose-400/50"
+                  title="删除对象"
+                  type="button"
+                  onClick={() => {
+                    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
+                    setSelectedDrawingId(null)
+                    setDrawingSettingsOpen(false)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {drawingSettingsOpen ? (
+                <DrawingObjectSettingsPanel
+                  drawing={selectedDrawing}
+                  tab={drawingSettingsTab}
+                  onClose={() => setDrawingSettingsOpen(false)}
+                  onDelete={() => {
+                    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
+                    setSelectedDrawingId(null)
+                    setDrawingSettingsOpen(false)
+                  }}
+                  onSelectTab={setDrawingSettingsTab}
+                  onUpdate={(updater) => updateSelectedDrawing(updater)}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="pointer-events-none absolute inset-0">
+            {paneOverlays
+              .filter(
+                (overlay) =>
+                  overlay.settingsKey === 'volume' || overlay.settingsKey === 'rsi' || overlay.settingsKey === 'macd',
+              )
+              .map((overlay) => (
+                <PaneHeader
+                  key={overlay.key}
+                  description={overlay.description}
+                  showSettings={overlay.showSettings}
+                  title={overlay.title}
+                  top={overlay.top}
+                  onSettings={() => {
+                    if (!overlay.settingsKey) {
+                      return
+                    }
+                    openIndicatorSettings(overlay.settingsKey, overlay.settingsKey === 'volume' ? 'style' : 'inputs')
+                  }}
+                />
+              ))}
           </div>
 
           <div className="pointer-events-none absolute bottom-4 left-16 z-10 flex items-end gap-2 text-white/14">
@@ -832,23 +1181,6 @@ export function TradingChart({
             </svg>
           </div>
 
-          {settingsPanel ? (
-            <IndicatorSettingsPanel
-              draftSettings={draftSettings}
-              error={settingsError}
-              panel={settingsPanel}
-              onApply={() => {
-                if (settingsError) {
-                  return
-                }
-                onApplyIndicatorSettings(draftSettings)
-                setSettingsPanel(null)
-              }}
-              onChange={setDraftSettings}
-              onClose={() => setSettingsPanel(null)}
-              onReset={() => setDraftSettings(DEFAULT_INDICATOR_SETTINGS)}
-            />
-          ) : null}
         </div>
       </div>
 
@@ -866,7 +1198,7 @@ export function TradingChart({
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-        <p>快捷键: {timeframeShortcutLabel} / F 适应 / L 最新 / V 游标 / S 选择 / G 趋势线 / A 箭头 / R 射线 / X 延长线 / H 水平 / N 垂直 / O 矩形</p>
+        <p>快捷键: {timeframeShortcutLabel} / F 适应 / L 最新 / V 游标 / S 选择 / G 趋势线 / C 通道线 / K 斐波那契 / A 箭头 / R 射线 / X 延长线 / H 水平 / N 垂直 / O 矩形</p>
         <div className="flex flex-wrap items-center gap-2">
           {positions.slice(0, 6).map((position, index) => (
             <button
@@ -893,6 +1225,12 @@ export function TradingChart({
         >
           <MenuItem label="适应内容" onClick={() => chartRefs.current?.chart.timeScale().fitContent()} />
           <MenuItem label="跳到最新" onClick={() => chartRefs.current?.chart.timeScale().scrollToRealTime()} />
+          {selectedDrawing ? <MenuItem label="对象设置" onClick={() => setDrawingSettingsOpen(true)} /> : null}
+          {selectedDrawing ? <MenuItem label="删除对象" onClick={() => {
+            setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
+            setSelectedDrawingId(null)
+            setDrawingSettingsOpen(false)
+          }} /> : null}
           <MenuItem label="切换交易标记" onClick={() => onIndicatorToggle('showTradeMarkers')} />
           <MenuItem label="切换 RSI" onClick={() => onIndicatorToggle('showRsi')} />
           <MenuItem label="切换 MACD" onClick={() => onIndicatorToggle('showMacd')} />
@@ -955,7 +1293,7 @@ function DraggableTradePanel({
 
   return (
     <div
-      className="absolute z-20 w-64 rounded-[22px] border border-white/10 bg-[#0a1322]/95 shadow-2xl backdrop-blur"
+      className="fixed z-[120] w-64 rounded-[22px] border border-white/10 bg-[#0a1322]/95 shadow-2xl backdrop-blur"
       style={{
         top: panelPosition.top,
         right: panelPosition.right,
@@ -1075,20 +1413,78 @@ function IconToolbarButton({
   )
 }
 
-function IndicatorToggleChip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function IndicatorMenuRow({
+  active,
+  label,
+  onToggle,
+  onConfigure,
+}: {
+  active: boolean
+  label: string
+  onToggle: () => void
+  onConfigure: (() => void) | null
+}) {
   return (
-    <button
-      className={cx(
-        'rounded-xl border px-3 py-2 text-sm transition',
-        active
-          ? 'border-sky-400 bg-sky-500/18 text-white'
-          : 'border-white/8 bg-white/5 text-slate-300 hover:border-slate-400',
-      )}
-      type="button"
-      onClick={onClick}
-    >
-      {label}
-    </button>
+    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/5 px-3 py-2">
+      <button
+        className={cx(
+          'rounded-full border px-2.5 py-1 text-xs transition',
+          active
+            ? 'border-sky-400 bg-sky-500/18 text-white'
+            : 'border-white/8 bg-[#101926] text-slate-300 hover:border-slate-400',
+        )}
+        type="button"
+        onClick={onToggle}
+      >
+        {active ? '已开' : '已关'}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-white">{label}</p>
+      </div>
+      {onConfigure ? (
+        <button
+          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 transition hover:border-sky-400/50 hover:text-white"
+          type="button"
+          onClick={onConfigure}
+        >
+          设置
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function ChartIndicatorRow({
+  label,
+  onToggle,
+  onConfigure,
+}: {
+  label: string
+  onToggle: () => void
+  onConfigure: (() => void) | null
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-xl px-2 py-1 text-sm text-slate-200">
+      <span className="min-w-0 flex-1 truncate text-[15px] text-slate-200">{label}</span>
+      <button
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-slate-300 transition hover:border-slate-400 hover:text-white"
+        title="隐藏指标"
+        type="button"
+        onClick={onToggle}
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+      {onConfigure ? (
+        <button
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-slate-300 transition hover:border-sky-400/50 hover:text-white"
+          title="指标设置"
+          type="button"
+          onClick={onConfigure}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -1107,6 +1503,8 @@ function DrawingToolbar({
     { tool: 'cursor', label: '游标', icon: MousePointer2 },
     { tool: 'select', label: '选择', icon: Crosshair },
     { tool: 'trendline', label: '趋势线', icon: TrendingUp },
+    { tool: 'parallelChannel', label: '通道线', icon: RectangleHorizontal },
+    { tool: 'fibRetracement', label: '斐波那契回撤', icon: Search },
     { tool: 'arrow', label: '箭头线', icon: ArrowUpRight },
     { tool: 'ray', label: '射线', icon: PencilLine },
     { tool: 'extendedLine', label: '延长线', icon: Slash },
@@ -1154,54 +1552,121 @@ function DrawingShape({
   selected: boolean
   draft?: boolean
 }) {
-  const stroke = draft ? 'rgba(125, 211, 252, 0.95)' : selected ? '#fbbf24' : '#7dd3fc'
-  const strokeWidth = selected ? 2.5 : 1.75
-  const fill = draft ? 'rgba(125, 211, 252, 0.12)' : selected ? 'rgba(251, 191, 36, 0.12)' : 'rgba(125, 211, 252, 0.08)'
-
-  if (drawing.kind === 'line') {
-    const angle = Math.atan2(drawing.y2 - drawing.y1, drawing.x2 - drawing.x1)
-    const arrowSize = 10
-    return (
-      <g>
-        <line x1={drawing.x1} x2={drawing.x2} y1={drawing.y1} y2={drawing.y2} stroke={stroke} strokeWidth={strokeWidth} />
-        {drawing.arrowHead ? (
-          <polygon
-            fill={stroke}
-            points={[
-              `${drawing.x2},${drawing.y2}`,
-              `${drawing.x2 - arrowSize * Math.cos(angle - Math.PI / 6)},${drawing.y2 - arrowSize * Math.sin(angle - Math.PI / 6)}`,
-              `${drawing.x2 - arrowSize * Math.cos(angle + Math.PI / 6)},${drawing.y2 - arrowSize * Math.sin(angle + Math.PI / 6)}`,
-            ].join(' ')}
-          />
-        ) : null}
-        {selected ? (
-          <>
-            <circle cx={drawing.x1} cy={drawing.y1} fill="#0b1020" r="4" stroke={stroke} strokeWidth="1.5" />
-            <circle cx={drawing.x2} cy={drawing.y2} fill="#0b1020" r="4" stroke={stroke} strokeWidth="1.5" />
-          </>
-        ) : null}
-      </g>
-    )
-  }
-
+  const stroke = draft ? 'rgba(125, 211, 252, 0.95)' : selected ? '#fbbf24' : drawing.lineColor
+  const strokeWidth = draft ? drawing.lineWidth : selected ? Math.max(drawing.lineWidth, 2.5) : drawing.lineWidth
+  const dashArray = lineStyleToDashArray(drawing.lineStyle)
   return (
     <g>
-      <rect
-        fill={fill}
-        height={drawing.height}
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-        width={drawing.width}
-        x={drawing.x}
-        y={drawing.y}
-      />
-      {selected ? (
-        <>
-          <circle cx={drawing.x} cy={drawing.y} fill="#0b1020" r="4" stroke={stroke} strokeWidth="1.5" />
-          <circle cx={drawing.x + drawing.width} cy={drawing.y + drawing.height} fill="#0b1020" r="4" stroke={stroke} strokeWidth="1.5" />
-        </>
-      ) : null}
+      {drawing.fills.map((fill, index) => (
+        <polygon key={`fill-${index}`} fill={fill.fill} points={fill.points} />
+      ))}
+      {drawing.rects.map((rect, index) => (
+        <rect
+          key={`rect-${index}`}
+          fill={rect.fill}
+          height={rect.height}
+          stroke={rect.stroke ?? stroke}
+          strokeDasharray={dashArray}
+          strokeWidth={strokeWidth}
+          width={rect.width}
+          x={rect.x}
+          y={rect.y}
+        />
+      ))}
+      {drawing.segments.map((segment, index) => (
+        <g key={`segment-${index}`}>
+          <line
+            x1={segment.x1}
+            x2={segment.x2}
+            y1={segment.y1}
+            y2={segment.y2}
+            stroke={segment.color ?? stroke}
+            strokeDasharray={dashArray}
+            strokeWidth={strokeWidth}
+          />
+          {segment.arrowHeadStart ? (
+            <ArrowHead x1={segment.x2} x2={segment.x1} y1={segment.y2} y2={segment.y1} stroke={segment.color ?? stroke} />
+          ) : null}
+          {segment.arrowHeadEnd ? (
+            <ArrowHead x1={segment.x1} x2={segment.x2} y1={segment.y1} y2={segment.y2} stroke={segment.color ?? stroke} />
+          ) : null}
+        </g>
+      ))}
+      {drawing.labels.map((label, index) => (
+        <g key={`label-${index}`} transform={`translate(${label.x}, ${label.y})`}>
+          {label.background ? (
+            <rect
+              fill={label.background}
+              height="18"
+              rx="5"
+              width={Math.max(label.text.length * 7.4, 36)}
+              x={label.anchor === 'end' ? -Math.max(label.text.length * 7.4, 36) - 6 : label.anchor === 'middle' ? -Math.max(label.text.length * 7.4, 36) / 2 - 3 : -2}
+              y="-13"
+            />
+          ) : null}
+          <text
+            dominantBaseline="middle"
+            fill={label.color ?? stroke}
+            fontSize="11"
+            textAnchor={label.anchor ?? 'start'}
+            y="0"
+          >
+            {label.text}
+          </text>
+        </g>
+      ))}
+      {drawing.midpoints?.map((point, index) => (
+        <circle
+          key={`midpoint-${index}`}
+          cx={point.x}
+          cy={point.y}
+          fill="#0b1020"
+          r="3.5"
+          stroke={stroke}
+          strokeWidth="1.25"
+        />
+      ))}
+      {selected
+        ? drawing.handles.map((handle, index) => (
+            <circle
+              key={`handle-${index}`}
+              cx={handle.x}
+              cy={handle.y}
+              fill="#0b1020"
+              r="4"
+              stroke={stroke}
+              strokeWidth="1.5"
+            />
+          ))
+        : null}
     </g>
+  )
+}
+
+function ArrowHead({
+  x1,
+  y1,
+  x2,
+  y2,
+  stroke,
+}: {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  stroke: string
+}) {
+  const angle = Math.atan2(y2 - y1, x2 - x1)
+  const arrowSize = 10
+  return (
+    <polygon
+      fill={stroke}
+      points={[
+        `${x2},${y2}`,
+        `${x2 - arrowSize * Math.cos(angle - Math.PI / 6)},${y2 - arrowSize * Math.sin(angle - Math.PI / 6)}`,
+        `${x2 - arrowSize * Math.cos(angle + Math.PI / 6)},${y2 - arrowSize * Math.sin(angle + Math.PI / 6)}`,
+      ].join(' ')}
+    />
   )
 }
 
@@ -1240,22 +1705,34 @@ function PaneHeader({
 function IndicatorSettingsPanel({
   panel,
   draftSettings,
+  draftIndicatorStyleSettings,
+  settingsTab,
   error,
   onChange,
+  onChangeStyle,
   onApply,
   onClose,
   onReset,
+  onResetStyle,
+  onSelectTab,
 }: {
   panel: Exclude<SettingsPanelKey, null>
   draftSettings: IndicatorSettings
+  draftIndicatorStyleSettings: IndicatorStyleSettings
+  settingsTab: SettingsTabKey
   error: string | null
   onChange: Dispatch<SetStateAction<IndicatorSettings>>
+  onChangeStyle: Dispatch<SetStateAction<IndicatorStyleSettings>>
   onApply: () => void
   onClose: () => void
   onReset: () => void
+  onResetStyle: () => void
+  onSelectTab: (tab: SettingsTabKey) => void
 }) {
+  const supportsInputs = panel !== 'volume'
+  const supportsStyle = true
   return (
-    <div className="absolute right-4 top-4 z-20 w-[22rem] rounded-[24px] border border-white/10 bg-[#07101b]/95 p-4 shadow-2xl backdrop-blur">
+    <div className="w-[24rem] rounded-[24px] border border-white/10 bg-[#07101b]/95 p-4 shadow-2xl backdrop-blur">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Indicator Settings</p>
@@ -1270,8 +1747,35 @@ function IndicatorSettingsPanel({
         </button>
       </div>
 
+      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/8 bg-white/5 p-1">
+        {supportsInputs ? (
+          <button
+            className={cx(
+              'rounded-xl px-3 py-2 text-sm transition',
+              settingsTab === 'inputs' ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
+            )}
+            type="button"
+            onClick={() => onSelectTab('inputs')}
+          >
+            Inputs
+          </button>
+        ) : null}
+        {supportsStyle ? (
+          <button
+            className={cx(
+              'rounded-xl px-3 py-2 text-sm transition',
+              settingsTab === 'style' ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
+            )}
+            type="button"
+            onClick={() => onSelectTab('style')}
+          >
+            Style
+          </button>
+        ) : null}
+      </div>
+
       <div className="mt-4 space-y-3">
-        {panel === 'ema' ? (
+        {settingsTab === 'inputs' && panel === 'ema' ? (
           <>
             <NumericField
               label="EMA 周期"
@@ -1284,32 +1788,46 @@ function IndicatorSettingsPanel({
                 }))
               }
             />
-            <NumericField
-              label="布林周期"
-              step={1}
-              value={draftSettings.bollinger.period}
+          </>
+        ) : null}
+
+        {settingsTab === 'style' && panel === 'ema' ? (
+          <>
+            <ColorField
+              label="线条颜色"
+              value={draftIndicatorStyleSettings.ema.color}
               onChange={(value) =>
-                onChange((current) => ({
+                onChangeStyle((current) => ({
                   ...current,
-                  bollinger: { ...current.bollinger, period: clampInteger(value, 1, 500) },
+                  ema: { ...current.ema, color: value },
                 }))
               }
             />
             <NumericField
-              label="布林标准差倍数"
-              step={0.1}
-              value={draftSettings.bollinger.std_dev}
+              label="线宽"
+              step={1}
+              value={draftIndicatorStyleSettings.ema.lineWidth}
               onChange={(value) =>
-                onChange((current) => ({
+                onChangeStyle((current) => ({
                   ...current,
-                  bollinger: { ...current.bollinger, std_dev: clampFloat(value, 0.1, 10) },
+                  ema: { ...current.ema, lineWidth: clampInteger(value, 1, 6) },
+                }))
+              }
+            />
+            <LineStyleField
+              label="线型"
+              value={draftIndicatorStyleSettings.ema.lineStyle}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  ema: { ...current.ema, lineStyle: value },
                 }))
               }
             />
           </>
         ) : null}
 
-        {panel === 'bollinger' ? (
+        {settingsTab === 'inputs' && panel === 'bollinger' ? (
           <>
             <NumericField
               label="布林周期"
@@ -1336,21 +1854,182 @@ function IndicatorSettingsPanel({
           </>
         ) : null}
 
-        {panel === 'rsi' ? (
-          <NumericField
-            label="RSI 周期"
-            step={1}
-            value={draftSettings.rsi.period}
-            onChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                rsi: { ...current.rsi, period: clampInteger(value, 1, 500) },
-              }))
-            }
-          />
+        {settingsTab === 'style' && panel === 'bollinger' ? (
+          <>
+            <ColorField
+              label="上轨颜色"
+              value={draftIndicatorStyleSettings.bollinger.upperColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  bollinger: { ...current.bollinger, upperColor: value },
+                }))
+              }
+            />
+            <ColorField
+              label="中轨颜色"
+              value={draftIndicatorStyleSettings.bollinger.middleColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  bollinger: { ...current.bollinger, middleColor: value },
+                }))
+              }
+            />
+            <ColorField
+              label="下轨颜色"
+              value={draftIndicatorStyleSettings.bollinger.lowerColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  bollinger: { ...current.bollinger, lowerColor: value },
+                }))
+              }
+            />
+            <NumericField
+              label="线宽"
+              step={1}
+              value={draftIndicatorStyleSettings.bollinger.lineWidth}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  bollinger: { ...current.bollinger, lineWidth: clampInteger(value, 1, 6) },
+                }))
+              }
+            />
+            <LineStyleField
+              label="线型"
+              value={draftIndicatorStyleSettings.bollinger.lineStyle}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  bollinger: { ...current.bollinger, lineStyle: value },
+                }))
+              }
+            />
+          </>
         ) : null}
 
-        {panel === 'macd' ? (
+        {settingsTab === 'style' && panel === 'volume' ? (
+          <>
+            <ColorField
+              label="上涨量柱颜色"
+              value={draftIndicatorStyleSettings.volume.upColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  volume: { ...current.volume, upColor: value },
+                }))
+              }
+            />
+            <ColorField
+              label="下跌量柱颜色"
+              value={draftIndicatorStyleSettings.volume.downColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  volume: { ...current.volume, downColor: value },
+                }))
+              }
+            />
+          </>
+        ) : null}
+
+        {settingsTab === 'inputs' && panel === 'rsi' ? (
+          <>
+            <NumericField
+              label="RSI 周期"
+              step={1}
+              value={draftSettings.rsi.period}
+              onChange={(value) =>
+                onChange((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, period: clampInteger(value, 1, 500) },
+                }))
+              }
+            />
+          </>
+        ) : null}
+
+        {settingsTab === 'style' && panel === 'rsi' ? (
+          <>
+            <ColorField
+              label="线条颜色"
+              value={draftIndicatorStyleSettings.rsi.color}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, color: value },
+                }))
+              }
+            />
+            <NumericField
+              label="线宽"
+              step={1}
+              value={draftIndicatorStyleSettings.rsi.lineWidth}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, lineWidth: clampInteger(value, 1, 6) },
+                }))
+              }
+            />
+            <LineStyleField
+              label="线型"
+              value={draftIndicatorStyleSettings.rsi.lineStyle}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, lineStyle: value },
+                }))
+              }
+            />
+            <NumericField
+              label="上阈值"
+              step={1}
+              value={draftIndicatorStyleSettings.rsi.upperLevel}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, upperLevel: clampInteger(value, 1, 100) },
+                }))
+              }
+            />
+            <NumericField
+              label="下阈值"
+              step={1}
+              value={draftIndicatorStyleSettings.rsi.lowerLevel}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, lowerLevel: clampInteger(value, 1, 100) },
+                }))
+              }
+            />
+            <ColorField
+              label="阈值线颜色"
+              value={draftIndicatorStyleSettings.rsi.levelColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, levelColor: value },
+                }))
+              }
+            />
+            <LineStyleField
+              label="阈值线线型"
+              value={draftIndicatorStyleSettings.rsi.levelLineStyle}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  rsi: { ...current.rsi, levelLineStyle: value },
+                }))
+              }
+            />
+          </>
+        ) : null}
+
+        {settingsTab === 'inputs' && panel === 'macd' ? (
           <>
             <NumericField
               label="快线周期"
@@ -1387,6 +2066,72 @@ function IndicatorSettingsPanel({
             />
           </>
         ) : null}
+
+        {settingsTab === 'style' && panel === 'macd' ? (
+          <>
+            <ColorField
+              label="MACD 线颜色"
+              value={draftIndicatorStyleSettings.macd.macdColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, macdColor: value },
+                }))
+              }
+            />
+            <ColorField
+              label="信号线颜色"
+              value={draftIndicatorStyleSettings.macd.signalColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, signalColor: value },
+                }))
+              }
+            />
+            <NumericField
+              label="线宽"
+              step={1}
+              value={draftIndicatorStyleSettings.macd.lineWidth}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, lineWidth: clampInteger(value, 1, 6) },
+                }))
+              }
+            />
+            <LineStyleField
+              label="线型"
+              value={draftIndicatorStyleSettings.macd.lineStyle}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, lineStyle: value },
+                }))
+              }
+            />
+            <ColorField
+              label="正柱颜色"
+              value={draftIndicatorStyleSettings.macd.positiveColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, positiveColor: value },
+                }))
+              }
+            />
+            <ColorField
+              label="负柱颜色"
+              value={draftIndicatorStyleSettings.macd.negativeColor}
+              onChange={(value) =>
+                onChangeStyle((current) => ({
+                  ...current,
+                  macd: { ...current.macd, negativeColor: value },
+                }))
+              }
+            />
+          </>
+        ) : null}
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-xs text-slate-400">
@@ -1403,7 +2148,10 @@ function IndicatorSettingsPanel({
         <button
           className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white"
           type="button"
-          onClick={onReset}
+          onClick={() => {
+            onReset()
+            onResetStyle()
+          }}
         >
           恢复默认
         </button>
@@ -1424,6 +2172,312 @@ function IndicatorSettingsPanel({
             应用
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function DrawingObjectSettingsPanel({
+  drawing,
+  tab,
+  onClose,
+  onDelete,
+  onSelectTab,
+  onUpdate,
+}: {
+  drawing: DrawingObject
+  tab: DrawingSettingsTab
+  onClose: () => void
+  onDelete: () => void
+  onSelectTab: (tab: DrawingSettingsTab) => void
+  onUpdate: (updater: (drawing: DrawingObject) => DrawingObject) => void
+}) {
+  const updateSettings = (updater: (settings: DrawingSettings) => DrawingSettings) => {
+    onUpdate((current) => ({
+      ...current,
+      settings: updater(current.settings),
+    }))
+  }
+  const canFill = drawing.tool === 'rectangle' || drawing.tool === 'parallelChannel' || drawing.tool === 'fibRetracement'
+  const canExtend =
+    drawing.tool === 'trendline' || drawing.tool === 'parallelChannel' || drawing.tool === 'ray' || drawing.tool === 'extendedLine'
+
+  return (
+    <div className="pointer-events-auto w-[25rem] rounded-[24px] border border-white/10 bg-[#07101b]/96 p-4 shadow-2xl backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Drawing Settings</p>
+          <h3 className="mt-2 text-base font-semibold text-white">{drawingToolLabel(drawing.tool)}</h3>
+        </div>
+        <button
+          className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-400 hover:text-white"
+          type="button"
+          onClick={onClose}
+        >
+          关闭
+        </button>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/8 bg-white/5 p-1">
+        {(['style', 'text', 'coordinates', 'visibility'] as DrawingSettingsTab[]).map((item) => (
+          <button
+            key={item}
+            className={cx(
+              'rounded-xl px-3 py-2 text-sm capitalize transition',
+              tab === item ? 'bg-sky-500/20 text-white' : 'text-slate-300 hover:bg-white/8',
+            )}
+            type="button"
+            onClick={() => onSelectTab(item)}
+          >
+            {drawingTabLabel(item)}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {tab === 'style' ? (
+          <>
+            <ColorField
+              label="线条颜色"
+              value={drawing.settings.lineColor}
+              onChange={(value) => updateSettings((current) => ({ ...current, lineColor: value }))}
+            />
+            <NumericField
+              label="线宽"
+              step={1}
+              value={drawing.settings.lineWidth}
+              onChange={(value) => updateSettings((current) => ({ ...current, lineWidth: clampInteger(value, 1, 6) }))}
+            />
+            <LineStyleField
+              label="线型"
+              value={drawing.settings.lineStyle}
+              onChange={(value) => updateSettings((current) => ({ ...current, lineStyle: value }))}
+            />
+            {canFill ? (
+              <>
+                <ColorField
+                  label="填充颜色"
+                  value={drawing.settings.fillColor}
+                  onChange={(value) => updateSettings((current) => ({ ...current, fillColor: value }))}
+                />
+                <NumericField
+                  label="填充透明度 (%)"
+                  step={5}
+                  value={Math.round(drawing.settings.fillOpacity * 100)}
+                  onChange={(value) =>
+                    updateSettings((current) => ({ ...current, fillOpacity: clampFloat(value, 0, 100) / 100 }))
+                  }
+                />
+              </>
+            ) : null}
+            {drawing.tool === 'fibRetracement' ? (
+              <div className="space-y-2 rounded-2xl border border-white/10 bg-[#0d1626] p-3">
+                <p className="text-xs font-medium text-slate-300">斐波那契层级</p>
+                {drawing.settings.fibLevels.map((level, index) => (
+                  <div key={`${drawing.id}-fib-${index}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+                    <input
+                      checked={level.visible}
+                      type="checkbox"
+                      onChange={(event) =>
+                        updateSettings((current) => ({
+                          ...current,
+                          fibLevels: current.fibLevels.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, visible: event.target.checked } : item,
+                          ),
+                        }))
+                      }
+                    />
+                    <input
+                      className="h-10 rounded-xl border border-white/10 bg-[#111a2a] px-3 text-sm text-white outline-none transition focus:border-sky-400"
+                      step={0.01}
+                      type="number"
+                      value={level.value}
+                      onChange={(event) =>
+                        updateSettings((current) => ({
+                          ...current,
+                          fibLevels: current.fibLevels.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, value: clampFloat(Number(event.target.value), -5, 5) } : item,
+                          ),
+                        }))
+                      }
+                    />
+                    <input
+                      className="h-10 w-12 rounded-xl border border-white/10 bg-transparent"
+                      type="color"
+                      value={normalizeColorInput(level.color)}
+                      onChange={(event) =>
+                        updateSettings((current) => ({
+                          ...current,
+                          fibLevels: current.fibLevels.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, color: event.target.value } : item,
+                          ),
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {canExtend ? (
+              <label className="block">
+                <span className="mb-2 block text-xs font-medium text-slate-300">延伸</span>
+                <select
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-[#0d1626] px-3 text-sm text-white outline-none transition focus:border-sky-400"
+                  value={drawing.settings.extendLeft ? (drawing.settings.extendRight ? 'both' : 'left') : drawing.settings.extendRight ? 'right' : 'none'}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    updateSettings((current) => ({
+                      ...current,
+                      extendLeft: value === 'left' || value === 'both',
+                      extendRight: value === 'right' || value === 'both',
+                    }))
+                  }}
+                >
+                  <option value="none">不要扩大</option>
+                  <option value="right">向右延伸</option>
+                  <option value="left">向左延伸</option>
+                  <option value="both">双向延伸</option>
+                </select>
+              </label>
+            ) : null}
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white">
+              <input
+                checked={drawing.settings.showMidpoint}
+                type="checkbox"
+                onChange={(event) => updateSettings((current) => ({ ...current, showMidpoint: event.target.checked }))}
+              />
+              中点
+            </label>
+          </>
+        ) : null}
+
+        {tab === 'text' ? (
+          <>
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white">
+              <input
+                checked={drawing.settings.showText}
+                type="checkbox"
+                onChange={(event) => updateSettings((current) => ({ ...current, showText: event.target.checked }))}
+              />
+              显示文本
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs font-medium text-slate-300">文本</span>
+              <textarea
+                className="min-h-[5.5rem] w-full rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white outline-none transition focus:border-sky-400"
+                value={drawing.settings.text}
+                onChange={(event) => updateSettings((current) => ({ ...current, text: event.target.value }))}
+              />
+            </label>
+            <ColorField
+              label="文字颜色"
+              value={drawing.settings.textColor}
+              onChange={(value) => updateSettings((current) => ({ ...current, textColor: value }))}
+            />
+          </>
+        ) : null}
+
+        {tab === 'coordinates' ? (
+          <>
+            {drawing.points.map((point, index) => (
+              <div key={`${drawing.id}-${index}`} className="rounded-2xl border border-white/10 bg-[#0d1626] p-3">
+                <p className="mb-3 text-xs uppercase tracking-[0.18em] text-slate-500">Point {index + 1}</p>
+                <div className="space-y-3">
+                  <NumericField
+                    label="时间戳"
+                    step={1}
+                    value={point.time}
+                    onChange={(value) =>
+                      onUpdate((current) => ({
+                        ...current,
+                        points: current.points.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, time: clampInteger(value, 1, 9999999999) } : item,
+                        ),
+                      }))
+                    }
+                  />
+                  <NumericField
+                    label="价格"
+                    step={0.0001}
+                    value={point.price}
+                    onChange={(value) =>
+                      onUpdate((current) => ({
+                        ...current,
+                        points: current.points.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, price: clampFloat(value, 0.0000001, 99999999) } : item,
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            ))}
+          </>
+        ) : null}
+
+        {tab === 'visibility' ? (
+          <>
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white">
+              <input
+                checked={drawing.settings.visible}
+                type="checkbox"
+                onChange={(event) => updateSettings((current) => ({ ...current, visible: event.target.checked }))}
+              />
+              可见
+            </label>
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white">
+              <input
+                checked={drawing.settings.showPriceLabels}
+                type="checkbox"
+                onChange={(event) =>
+                  updateSettings((current) => ({ ...current, showPriceLabels: event.target.checked }))
+                }
+              />
+              价格标签
+            </label>
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-3 text-sm text-white">
+              <input
+                checked={drawing.settings.showStats}
+                type="checkbox"
+                onChange={(event) => updateSettings((current) => ({ ...current, showStats: event.target.checked }))}
+              />
+              统计数据
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs font-medium text-slate-300">统计位置</span>
+              <select
+                className="h-11 w-full rounded-2xl border border-white/10 bg-[#0d1626] px-3 text-sm text-white outline-none transition focus:border-sky-400"
+                value={drawing.settings.statsPosition}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    statsPosition: event.target.value as DrawingStatsPosition,
+                  }))
+                }
+              >
+                <option value="right">右</option>
+                <option value="left">左</option>
+              </select>
+            </label>
+          </>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <button
+          className="rounded-full border border-rose-400/20 px-3 py-2 text-sm text-rose-200 transition hover:border-rose-400/50"
+          type="button"
+          onClick={onDelete}
+        >
+          删除
+        </button>
+        <button
+          className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white"
+          type="button"
+          onClick={onClose}
+        >
+          完成
+        </button>
       </div>
     </div>
   )
@@ -1454,6 +2508,56 @@ function NumericField({
   )
 }
 
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-medium text-slate-300">{label}</span>
+      <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0d1626] px-3 py-2">
+        <input className="h-8 w-10 rounded border border-white/10 bg-transparent" type="color" value={normalizeColorInput(value)} onChange={(event) => onChange(event.target.value)} />
+        <input
+          className="flex-1 bg-transparent text-sm text-white outline-none"
+          type="text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+    </label>
+  )
+}
+
+function LineStyleField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: LineStyle
+  onChange: (value: LineStyle) => void
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-medium text-slate-300">{label}</span>
+      <select
+        className="h-11 w-full rounded-2xl border border-white/10 bg-[#0d1626] px-3 text-sm text-white outline-none transition focus:border-sky-400"
+        value={String(value)}
+        onChange={(event) => onChange(Number(event.target.value) as LineStyle)}
+      >
+        <option value={String(LineStyle.Solid)}>实线</option>
+        <option value={String(LineStyle.Dotted)}>点线</option>
+        <option value={String(LineStyle.Dashed)}>虚线</option>
+      </select>
+    </label>
+  )
+}
+
 function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -1466,9 +2570,43 @@ function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
   )
 }
 
-type ProjectedDrawing =
-  | { id: string; kind: 'line'; x1: number; y1: number; x2: number; y2: number; arrowHead?: boolean }
-  | { id: string; kind: 'rect'; x: number; y: number; width: number; height: number }
+type ProjectedSegment = {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  arrowHeadStart?: boolean
+  arrowHeadEnd?: boolean
+  color?: string
+}
+type ProjectedRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+  fill: string
+  stroke?: string
+}
+type ProjectedLabel = {
+  x: number
+  y: number
+  text: string
+  anchor?: 'start' | 'middle' | 'end'
+  background?: string
+  color?: string
+}
+type ProjectedDrawing = {
+  id: string
+  lineColor: string
+  lineWidth: number
+  lineStyle: LineStyle
+  segments: ProjectedSegment[]
+  rects: ProjectedRect[]
+  fills: Array<{ points: string; fill: string }>
+  labels: ProjectedLabel[]
+  handles: Array<{ x: number; y: number }>
+  midpoints?: Array<{ x: number; y: number }>
+}
 
 function handleDrawingMouseDown({
   chartRefs,
@@ -1540,12 +2678,24 @@ function handleDrawingMouseDown({
       if (!current || current.tool !== drawingTool) {
         return {
           tool: drawingTool,
-          start: point.data,
+          points: [point.data],
           current: point.data,
         }
       }
 
-      const nextDrawing = createDrawingObject(current.tool, [current.start, point.data])
+      if (current.tool === 'parallelChannel' && current.points.length === 1) {
+        return {
+          ...current,
+          points: [...current.points, point.data],
+          current: point.data,
+        }
+      }
+
+      const points =
+        current.tool === 'parallelChannel'
+          ? [...current.points, point.data]
+          : [current.points[0] ?? point.data, point.data]
+      const nextDrawing = createDrawingObject(current.tool, points)
       setDrawings((items) => [...items, nextDrawing])
       setSelectedDrawingId(nextDrawing.id)
       return null
@@ -1654,6 +2804,118 @@ function createDrawingObject(
     id: createDrawingId(),
     tool,
     points,
+    settings: getDefaultDrawingSettings(tool),
+  }
+}
+
+function buildDraftDrawingObject(draft: DrawingDraft): DrawingObject | null {
+  if (draft.tool === 'parallelChannel') {
+    if (draft.points.length === 1) {
+      return {
+        id: 'draft',
+        tool: 'trendline',
+        points: [draft.points[0], draft.current],
+        settings: getDefaultDrawingSettings('trendline'),
+      }
+    }
+    return {
+      id: 'draft',
+      tool: 'parallelChannel',
+      points: [draft.points[0], draft.points[1], draft.current],
+      settings: getDefaultDrawingSettings('parallelChannel'),
+    }
+  }
+
+  if (draft.points.length === 0) {
+    return null
+  }
+
+  return {
+    id: 'draft',
+    tool: draft.tool,
+    points: [draft.points[0], draft.current],
+    settings: getDefaultDrawingSettings(draft.tool),
+  }
+}
+
+function getDefaultDrawingSettings(tool: Exclude<DrawingTool, 'cursor' | 'select'>): DrawingSettings {
+  return {
+    lineColor: tool === 'fibRetracement' ? '#facc15' : '#7dd3fc',
+    lineWidth: 2,
+    lineStyle: tool === 'fibRetracement' ? LineStyle.Dashed : LineStyle.Solid,
+    fillColor:
+      tool === 'rectangle'
+        ? 'rgba(125, 211, 252, 0.18)'
+        : tool === 'parallelChannel'
+          ? 'rgba(96, 165, 250, 0.14)'
+          : tool === 'fibRetracement'
+            ? 'rgba(250, 204, 21, 0.08)'
+            : 'rgba(125, 211, 252, 0.08)',
+    fillOpacity: tool === 'rectangle' || tool === 'parallelChannel' || tool === 'fibRetracement' ? 0.18 : 0.08,
+    text: '',
+    textColor: '#e2e8f0',
+    showText: false,
+    showPriceLabels: tool === 'fibRetracement',
+    showStats: tool === 'trendline' || tool === 'parallelChannel' || tool === 'fibRetracement',
+    statsPosition: 'right',
+    showMidpoint: false,
+    visible: true,
+    extendLeft: tool === 'extendedLine',
+    extendRight: tool === 'ray' || tool === 'extendedLine',
+    fibLevels: DEFAULT_FIB_LEVELS,
+  }
+}
+
+function normalizeDrawingObject(raw: unknown): DrawingObject | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const candidate = raw as {
+    id?: unknown
+    tool?: unknown
+    points?: unknown
+    settings?: Partial<DrawingSettings>
+  }
+
+  if (typeof candidate.id !== 'string' || typeof candidate.tool !== 'string' || !Array.isArray(candidate.points)) {
+    return null
+  }
+
+  const points = candidate.points
+    .map((point) => {
+      if (!point || typeof point !== 'object') {
+        return null
+      }
+      const value = point as { time?: unknown; price?: unknown }
+      if (typeof value.time !== 'number' || typeof value.price !== 'number') {
+        return null
+      }
+      return { time: value.time, price: value.price }
+    })
+    .filter(Boolean) as DrawingPoint[]
+
+  if (points.length < 2) {
+    return null
+  }
+
+  const tool = candidate.tool as Exclude<DrawingTool, 'cursor' | 'select'>
+  const defaults = getDefaultDrawingSettings(tool)
+  return {
+    id: candidate.id,
+    tool,
+    points,
+    settings: {
+      ...defaults,
+      ...candidate.settings,
+      fibLevels: Array.isArray(candidate.settings?.fibLevels)
+        ? candidate.settings.fibLevels.map((level) => ({
+            value: typeof level.value === 'number' ? level.value : 0,
+            color: typeof level.color === 'string' ? level.color : defaults.lineColor,
+            visible: typeof level.visible === 'boolean' ? level.visible : true,
+          }))
+        : defaults.fibLevels,
+    },
   }
 }
 
@@ -1689,10 +2951,11 @@ function projectDrawing(
   pricePaneHeight: number,
   _revision: number,
 ): ProjectedDrawing | null {
-  if (!refs || pricePaneHeight <= 0) {
+  if (!refs || pricePaneHeight <= 0 || !drawing.settings.visible || drawing.points.length < 2) {
     return null
   }
 
+  const style = drawing.settings
   const [firstPoint, secondPoint] = drawing.points
   const x1 = refs.chart.timeScale().timeToCoordinate(toUtcTime(firstPoint.time))
   const y1 = refs.candleSeries.priceToCoordinate(firstPoint.price)
@@ -1701,11 +2964,19 @@ function projectDrawing(
   }
 
   if (drawing.tool === 'horizontalLine') {
-    return { id: drawing.id, kind: 'line', x1: 0, y1, x2: refs.chart.timeScale().width(), y2: y1 }
+    return buildProjectedDrawing(drawing, {
+      segments: [{ x1: 0, y1, x2: refs.chart.timeScale().width(), y2: y1 }],
+      handles: [{ x: x1, y: y1 }],
+      labels: style.showPriceLabels ? [buildPriceLabel(refs.chart.timeScale().width() - 6, y1, firstPoint.price)] : [],
+    })
   }
 
   if (drawing.tool === 'verticalLine') {
-    return { id: drawing.id, kind: 'line', x1, y1: 0, x2: x1, y2: pricePaneHeight }
+    return buildProjectedDrawing(drawing, {
+      segments: [{ x1, y1: 0, x2: x1, y2: pricePaneHeight }],
+      handles: [{ x: x1, y: y1 }],
+      labels: [],
+    })
   }
 
   const x2Base = refs.chart.timeScale().timeToCoordinate(toUtcTime(secondPoint.time))
@@ -1715,26 +2986,149 @@ function projectDrawing(
   }
 
   if (drawing.tool === 'rectangle') {
+    const x = Math.min(x1, x2Base)
+    const y = Math.min(y1, y2Base)
+    const width = Math.abs(x2Base - x1)
+    const height = Math.abs(y2Base - y1)
+    return buildProjectedDrawing(drawing, {
+      rects: [
+        {
+          x,
+          y,
+          width,
+          height,
+          fill: applyAlpha(style.fillColor, style.fillOpacity),
+          stroke: style.lineColor,
+        },
+      ],
+      handles: [
+        { x: x1, y: y1 },
+        { x: x2Base, y: y2Base },
+      ],
+      labels: buildDrawingLabels(drawing, firstPoint, secondPoint, x + width / 2, y + height / 2),
+    })
+  }
+
+  if (drawing.tool === 'parallelChannel' && drawing.points.length >= 3) {
+    const thirdPoint = drawing.points[2]
+    const x3 = refs.chart.timeScale().timeToCoordinate(toUtcTime(thirdPoint.time))
+    const y3 = refs.candleSeries.priceToCoordinate(thirdPoint.price)
+    if (x3 === null || y3 === null) {
+      return null
+    }
+    const dx = x2Base - x1
+    const dy = y2Base - y1
+    const x4 = x3 + dx
+    const y4 = y3 + dy
+    const primary = resolveLineSegmentForStyle(x1, y1, x2Base, y2Base, refs.chart.timeScale().width(), pricePaneHeight, drawing)
+    const secondary = resolveLineSegmentForStyle(x3, y3, x4, y4, refs.chart.timeScale().width(), pricePaneHeight, drawing)
+    if (!primary || !secondary) {
+      return null
+    }
+    return buildProjectedDrawing(drawing, {
+      segments: [
+        { ...primary },
+        { ...secondary },
+        { x1, y1, x2: x3, y2: y3 },
+      ],
+      fills: [
+        {
+          points: `${x1},${y1} ${x2Base},${y2Base} ${x4},${y4} ${x3},${y3}`,
+          fill: applyAlpha(style.fillColor, style.fillOpacity),
+        },
+      ],
+      handles: [
+        { x: x1, y: y1 },
+        { x: x2Base, y: y2Base },
+        { x: x3, y: y3 },
+      ],
+      midpoints: style.showMidpoint
+        ? [
+            { x: (x1 + x2Base) / 2, y: (y1 + y2Base) / 2 },
+            { x: (x3 + x4) / 2, y: (y3 + y4) / 2 },
+          ]
+        : [],
+      labels: buildDrawingLabels(drawing, firstPoint, secondPoint, style.statsPosition === 'right' ? x4 : x3, (y1 + y3) / 2),
+    })
+  }
+
+  if (drawing.tool === 'fibRetracement') {
+    const minX = Math.min(x1, x2Base)
+    const maxX = Math.max(x1, x2Base)
+    const labels = drawing.settings.fibLevels
+      .filter((level) => level.visible)
+      .map((level, index, list) => {
+        const y = y1 + (y2Base - y1) * level.value
+        const nextY =
+          list[index + 1] && list[index + 1].visible
+            ? y1 + (y2Base - y1) * list[index + 1].value
+            : null
+        return {
+          segment: { x1: minX, y1: y, x2: maxX, y2: y, color: level.color },
+          fill:
+            nextY !== null
+              ? {
+                  points: `${minX},${y} ${maxX},${y} ${maxX},${nextY} ${minX},${nextY}`,
+                  fill: applyAlpha(level.color, 0.08),
+                }
+              : null,
+          label: {
+            x: maxX + 8,
+            y,
+            text: `${(level.value * 100).toFixed(level.value === 0 || level.value === 1 ? 0 : 1)}% ${formatNumber(firstPoint.price + (secondPoint.price - firstPoint.price) * level.value)}`,
+            color: level.color,
+          } satisfies ProjectedLabel,
+        }
+      })
     return {
       id: drawing.id,
-      kind: 'rect',
-      x: Math.min(x1, x2Base),
-      y: Math.min(y1, y2Base),
-      width: Math.abs(x2Base - x1),
-      height: Math.abs(y2Base - y1),
+      lineColor: style.lineColor,
+      lineWidth: style.lineWidth,
+      lineStyle: style.lineStyle,
+      segments: [
+        { x1: minX, y1, x2: minX, y2: y2Base },
+        { x1: maxX, y1, x2: maxX, y2: y2Base },
+        ...labels.map((item) => item.segment),
+      ],
+      rects: [],
+      fills: labels.flatMap((item) => (item.fill ? [item.fill] : [])),
+      labels: [
+        ...labels.map((item) => item.label),
+        ...buildDrawingLabels(drawing, firstPoint, secondPoint, maxX, (y1 + y2Base) / 2),
+      ],
+      handles: [
+        { x: x1, y: y1 },
+        { x: x2Base, y: y2Base },
+      ],
+      midpoints: style.showMidpoint ? [{ x: (x1 + x2Base) / 2, y: (y1 + y2Base) / 2 }] : [],
     }
   }
 
-  if (drawing.tool === 'trendline') {
-    return { id: drawing.id, kind: 'line', x1, y1, x2: x2Base, y2: y2Base }
+  const segment = resolveLineSegmentForStyle(x1, y1, x2Base, y2Base, refs.chart.timeScale().width(), pricePaneHeight, drawing)
+  if (!segment) {
+    return null
   }
 
-  if (drawing.tool === 'arrow') {
-    return { id: drawing.id, kind: 'line', x1, y1, x2: x2Base, y2: y2Base, arrowHead: true }
-  }
-
-  const extended = extendLineToBounds(x1, y1, x2Base, y2Base, refs.chart.timeScale().width(), pricePaneHeight, drawing.tool)
-  return extended ? { id: drawing.id, kind: 'line', ...extended } : null
+  return buildProjectedDrawing(drawing, {
+    segments: [
+      {
+        ...segment,
+        arrowHeadEnd: drawing.tool === 'arrow',
+      },
+    ],
+    handles: [
+      { x: x1, y: y1 },
+      { x: x2Base, y: y2Base },
+    ],
+    midpoints: style.showMidpoint ? [{ x: (x1 + x2Base) / 2, y: (y1 + y2Base) / 2 }] : [],
+    labels: buildDrawingLabels(
+      drawing,
+      firstPoint,
+      secondPoint,
+      style.statsPosition === 'right' ? x2Base : x1,
+      style.statsPosition === 'right' ? y2Base : y1,
+    ),
+  })
 }
 
 function hitTestDrawings(
@@ -1752,23 +3146,169 @@ function hitTestDrawings(
       continue
     }
 
-    if (projected.kind === 'line') {
-      if (distanceToSegment(x, y, projected.x1, projected.y1, projected.x2, projected.y2) <= tolerance) {
-        return { id: source.id, source }
-      }
-      continue
-    }
-
-    const withinRect =
-      x >= projected.x - tolerance &&
-      x <= projected.x + projected.width + tolerance &&
-      y >= projected.y - tolerance &&
-      y <= projected.y + projected.height + tolerance
-    if (withinRect) {
+    const hitLine = projected.segments.some(
+      (segment) => distanceToSegment(x, y, segment.x1, segment.y1, segment.x2, segment.y2) <= tolerance,
+    )
+    const hitRect = projected.rects.some(
+      (rect) =>
+        x >= rect.x - tolerance &&
+        x <= rect.x + rect.width + tolerance &&
+        y >= rect.y - tolerance &&
+        y <= rect.y + rect.height + tolerance,
+    )
+    const hitFill = projected.fills.some((fill) => pointNearPolygonBounds(x, y, fill.points, tolerance))
+    if (hitLine || hitRect || hitFill) {
       return { id: source.id, source }
     }
   }
   return null
+}
+
+function buildProjectedDrawing(
+  drawing: DrawingObject,
+  parts: {
+    segments?: ProjectedSegment[]
+    rects?: ProjectedRect[]
+    fills?: Array<{ points: string; fill: string }>
+    labels?: ProjectedLabel[]
+    handles?: Array<{ x: number; y: number }>
+    midpoints?: Array<{ x: number; y: number }>
+  },
+): ProjectedDrawing {
+  return {
+    id: drawing.id,
+    lineColor: drawing.settings.lineColor,
+    lineWidth: drawing.settings.lineWidth,
+    lineStyle: drawing.settings.lineStyle,
+    segments: parts.segments ?? [],
+    rects: parts.rects ?? [],
+    fills: parts.fills ?? [],
+    labels: parts.labels ?? [],
+    handles: parts.handles ?? [],
+    midpoints: parts.midpoints ?? [],
+  }
+}
+
+function resolveLineSegmentForStyle(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  width: number,
+  height: number,
+  drawing: DrawingObject,
+) {
+  const mode = getDrawingExtendMode(drawing)
+  if (mode === 'segment') {
+    return { x1, y1, x2, y2 }
+  }
+  if (mode === 'right') {
+    return extendLineToBounds(x1, y1, x2, y2, width, height, 'ray')
+  }
+  if (mode === 'both') {
+    return extendLineToBounds(x1, y1, x2, y2, width, height, 'extendedLine')
+  }
+
+  const reversed = extendLineToBounds(x2, y2, x1, y1, width, height, 'ray')
+  return reversed ? { x1: reversed.x2, y1: reversed.y2, x2, y2 } : { x1, y1, x2, y2 }
+}
+
+function getDrawingExtendMode(drawing: DrawingObject) {
+  if (drawing.tool === 'ray') {
+    return 'right'
+  }
+  if (drawing.tool === 'extendedLine') {
+    return 'both'
+  }
+  if (drawing.settings.extendLeft && drawing.settings.extendRight) {
+    return 'both'
+  }
+  if (drawing.settings.extendRight) {
+    return 'right'
+  }
+  if (drawing.settings.extendLeft) {
+    return 'left'
+  }
+  return 'segment'
+}
+
+function buildDrawingLabels(
+  drawing: DrawingObject,
+  firstPoint: DrawingPoint,
+  secondPoint: DrawingPoint,
+  anchorX: number,
+  anchorY: number,
+): ProjectedLabel[] {
+  const labels: ProjectedLabel[] = []
+  const xOffset = drawing.settings.statsPosition === 'right' ? 12 : -12
+  const anchor: ProjectedLabel['anchor'] = drawing.settings.statsPosition === 'right' ? 'start' : 'end'
+
+  if (drawing.settings.showStats) {
+    const delta = secondPoint.price - firstPoint.price
+    const deltaPct = firstPoint.price !== 0 ? (delta / firstPoint.price) * 100 : 0
+    const bars = Math.max(Math.round(Math.abs(secondPoint.time - firstPoint.time) / 60), 1)
+    labels.push({
+      x: anchorX + xOffset,
+      y: anchorY - 12,
+      text: `${formatSignedNumber(delta, 6)} (${formatSignedPercent(deltaPct)}) · ${bars}m`,
+      anchor,
+      background: 'rgba(8, 17, 29, 0.88)',
+      color: drawing.settings.lineColor,
+    })
+  }
+
+  if (drawing.settings.showText && drawing.settings.text.trim()) {
+    labels.push({
+      x: anchorX + xOffset,
+      y: anchorY + 10,
+      text: drawing.settings.text.trim(),
+      anchor,
+      background: 'rgba(8, 17, 29, 0.88)',
+      color: drawing.settings.textColor,
+    })
+  }
+
+  if (drawing.settings.showPriceLabels) {
+    labels.push(buildPriceLabel(anchorX + xOffset, anchorY + 28, secondPoint.price, anchor, drawing.settings.lineColor))
+  }
+
+  return labels
+}
+
+function buildPriceLabel(
+  x: number,
+  y: number,
+  price: number,
+  anchor: ProjectedLabel['anchor'] = 'end',
+  color = '#cbd5e1',
+): ProjectedLabel {
+  return {
+    x,
+    y,
+    text: formatNumber(price),
+    anchor,
+    background: 'rgba(8, 17, 29, 0.88)',
+    color,
+  }
+}
+
+function pointNearPolygonBounds(x: number, y: number, points: string, tolerance: number) {
+  const values = points
+    .split(' ')
+    .map((point) => point.split(',').map(Number))
+    .filter((pair) => pair.length === 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+  if (values.length < 2) {
+    return false
+  }
+
+  for (let index = 0; index < values.length; index += 1) {
+    const [x1, y1] = values[index]
+    const [x2, y2] = values[(index + 1) % values.length]
+    if (distanceToSegment(x, y, x1, y1, x2, y2) <= tolerance) {
+      return true
+    }
+  }
+  return false
 }
 
 function extendLineToBounds(
@@ -1932,9 +3472,20 @@ function findValueAtTime(
 }
 
 function formatEpoch(time: number) {
-  return new Date(time * 1000).toLocaleString('zh-CN', {
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
     hour12: false,
   })
+  const parts = formatter.formatToParts(new Date(time * 1000))
+  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${partMap.weekday ?? ''} ${partMap.year ?? '----'}-${partMap.month ?? '--'}-${partMap.day ?? '--'} ${partMap.hour ?? '--'}:${partMap.minute ?? '--'}:${partMap.second ?? '--'} 北京时间`
 }
 
 function formatSignedNumber(value: number, digits = 2) {
@@ -1950,6 +3501,80 @@ function formatSignedPercent(value: number, digits = 2) {
     return '--'
   }
   return `${value >= 0 ? '+' : '-'}${Math.abs(value).toFixed(digits)}%`
+}
+
+function lineStyleToDashArray(style: LineStyle) {
+  if (style === LineStyle.Dashed) {
+    return '8 6'
+  }
+  if (style === LineStyle.Dotted) {
+    return '2 5'
+  }
+  return undefined
+}
+
+function applyAlpha(value: string, opacity: number) {
+  if (value.startsWith('rgba(')) {
+    const rgbaParts = value.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([^)]+)\)/)
+    if (rgbaParts) {
+      return `rgba(${rgbaParts[1]}, ${rgbaParts[2]}, ${rgbaParts[3]}, ${opacity})`
+    }
+  }
+  if (value.startsWith('rgb(')) {
+    const rgbParts = value.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/)
+    if (rgbParts) {
+      return `rgba(${rgbParts[1]}, ${rgbParts[2]}, ${rgbParts[3]}, ${opacity})`
+    }
+  }
+  if (value.startsWith('#')) {
+    const color = normalizeColorInput(value).replace('#', '')
+    const normalized = color.length === 3 ? color.split('').map((item) => item + item).join('') : color
+    const r = Number.parseInt(normalized.slice(0, 2), 16)
+    const g = Number.parseInt(normalized.slice(2, 4), 16)
+    const b = Number.parseInt(normalized.slice(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`
+  }
+  return value
+}
+
+function normalizeColorInput(value: string) {
+  return value.startsWith('#') ? value : '#94a3b8'
+}
+
+function drawingToolLabel(tool: Exclude<DrawingTool, 'cursor' | 'select'>) {
+  switch (tool) {
+    case 'trendline':
+      return '趋势线'
+    case 'parallelChannel':
+      return '通道线'
+    case 'fibRetracement':
+      return '斐波那契回撤'
+    case 'arrow':
+      return '箭头线'
+    case 'ray':
+      return '射线'
+    case 'extendedLine':
+      return '延长线'
+    case 'horizontalLine':
+      return '水平线'
+    case 'verticalLine':
+      return '垂直线'
+    case 'rectangle':
+      return '矩形'
+  }
+}
+
+function drawingTabLabel(tab: DrawingSettingsTab) {
+  switch (tab) {
+    case 'style':
+      return '样式'
+    case 'text':
+      return '文本'
+    case 'coordinates':
+      return '坐标'
+    case 'visibility':
+      return '可见范围'
+  }
 }
 
 function toWorkspaceSymbol(symbol: string) {
@@ -2058,8 +3683,8 @@ function buildPaneOverlays(indicators: IndicatorState, indicatorSettings: Indica
       top,
       title: paneTitle(pane.key, indicatorSettings),
       description: paneDescription(pane.key, indicatorSettings),
-      showSettings: !['volume', 'price'].includes(pane.key),
-      settingsKey: pane.key === 'volume' || pane.key === 'price' ? null : pane.key,
+      showSettings: pane.key !== 'price',
+      settingsKey: pane.key === 'price' ? null : pane.key,
     }
   })
 }
@@ -2137,6 +3762,9 @@ function panelTitle(panel: Exclude<SettingsPanelKey, null>) {
   if (panel === 'bollinger') {
     return '布林带参数'
   }
+  if (panel === 'volume') {
+    return '成交量样式'
+  }
   if (panel === 'rsi') {
     return 'RSI 参数'
   }
@@ -2149,6 +3777,9 @@ function panelDescription(panel: Exclude<SettingsPanelKey, null>, settings: Indi
   }
   if (panel === 'bollinger') {
     return `当前使用 BOLL(${settings.bollinger.period}, ${settings.bollinger.std_dev})，会同步刷新上下轨和中轨。`
+  }
+  if (panel === 'volume') {
+    return '成交量没有计算输入，但可以调整上涨/下跌量柱颜色。'
   }
   if (panel === 'rsi') {
     return `当前使用 RSI(${settings.rsi.period})，适合观察超买超卖节奏。`
@@ -2180,6 +3811,10 @@ function clampInteger(value: number, min: number, max: number) {
     return min
   }
   return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function toLineWidth(value: number) {
+  return clampInteger(value, 1, 4) as 1 | 2 | 3 | 4
 }
 
 function clampFloat(value: number, min: number, max: number) {

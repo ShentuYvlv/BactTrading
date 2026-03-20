@@ -77,7 +77,12 @@ def load_symbols_from_csv(csv_file_path: str | Path, min_trades: int | None = No
         return {}
 
 
-def load_positions_from_csv(csv_file_path: str | Path, symbol: str | None = None) -> list[dict]:
+def load_positions_from_csv(
+    csv_file_path: str | Path,
+    symbol: str | None = None,
+    since_ms: int | None = None,
+    until_ms: int | None = None,
+) -> list[dict]:
     path = Path(csv_file_path)
     if not path.exists():
         logger.error("CSV文件不存在: %s", path)
@@ -136,6 +141,21 @@ def load_positions_from_csv(csv_file_path: str | Path, symbol: str | None = None
             except Exception as exc:
                 logger.error("处理仓位CSV记录失败: %s", exc)
                 continue
+
+        if since_ms is not None or until_ms is not None:
+            lower_bound = (since_ms // 1000) if since_ms is not None else None
+            upper_bound = (until_ms // 1000) if until_ms is not None else None
+
+            def overlaps_range(position: dict) -> bool:
+                open_time = position["open_time"]
+                close_time = position["close_time"] if position["close_time"] is not None else open_time
+                if lower_bound is not None and close_time < lower_bound:
+                    return False
+                if upper_bound is not None and open_time > upper_bound:
+                    return False
+                return True
+
+            positions_data = [position for position in positions_data if overlaps_range(position)]
 
         return positions_data
     except Exception as exc:

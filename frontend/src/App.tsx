@@ -32,7 +32,6 @@ const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
 
 function App() {
   const queryClient = useQueryClient()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [exchange, setExchange] = useState('binance')
   const [dataFile, setDataFile] = useState<string | null>(null)
   const [symbol, setSymbol] = useState('')
@@ -197,6 +196,7 @@ function App() {
   const selectedPosition: PositionRecord | undefined = positions.find(
     (position) => position.position_id === selectedPositionId,
   )
+  const chartLoadingLabel = loadMoreMutation.isPending ? '正在同步更多K线...' : '正在加载图表...'
 
   function handleLoadChart(overrides?: Partial<{ timeframe: string }>) {
     if (!symbol || !timeframe || !startDate || !endDate) {
@@ -300,29 +300,8 @@ function App() {
   return (
     <main className="min-h-screen bg-ink bg-grid bg-[size:36px_36px] text-slate-100">
       <div className="mx-auto min-h-screen max-w-[1920px] px-3 py-3">
-        <button
-          className="fixed left-4 top-4 z-50 rounded-full border border-white/10 bg-[#07101b]/92 px-4 py-2 text-sm font-medium text-white shadow-2xl backdrop-blur transition hover:border-sky-400/60"
-          type="button"
-          onClick={() => setSidebarOpen((current) => !current)}
-        >
-          {sidebarOpen ? '收起工作台' : '打开工作台'}
-        </button>
-
-        <div
-          className={
-            sidebarOpen
-              ? 'fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px]'
-              : 'pointer-events-none fixed inset-0 z-40 bg-black/0 opacity-0'
-          }
-          onClick={() => setSidebarOpen(false)}
-        />
-
-        <div
-          className={`fixed bottom-3 left-3 top-3 z-50 w-[26rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-[30px] transition-transform duration-300 ${
-            sidebarOpen ? 'translate-x-0' : '-translate-x-[calc(100%+1rem)]'
-          }`}
-        >
-          <div className="h-full space-y-5 overflow-y-auto pr-1">
+        <div className="grid min-h-screen gap-4 xl:grid-cols-[minmax(22rem,1fr)_minmax(0,3fr)]">
+          <aside className="space-y-5 xl:sticky xl:top-3 xl:h-[calc(100vh-1.5rem)] xl:overflow-y-auto xl:pr-1">
             <ControlSidebar
               config={configQuery.data}
               dataFiles={dataFilesQuery.data?.items ?? []}
@@ -357,51 +336,53 @@ function App() {
               selectedPositionId={selectedPosition?.position_id ?? null}
               onSelectPosition={setSelectedPositionId}
             />
+          </aside>
+
+          <div className="space-y-3">
+            <section className="rounded-[24px] border border-white/10 bg-panel/78 px-5 py-4 shadow-panel backdrop-blur">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Workspace</p>
+                  <p className="mt-2 text-sm text-white">{statusMessage}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
+                    {chartMutation.data ? `${chartMutation.data.symbol} / ${chartMutation.data.timeframe}` : '等待加载'}
+                  </span>
+                  <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
+                    {dataFile ? dataFile.split('/').at(-1) ?? 'CSV' : 'Exchange API'}
+                  </span>
+                  {errorMessage ? (
+                    <p className="rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300">
+                      {errorMessage}
+                    </p>
+                  ) : (
+                    <p className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
+                      运行正常
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <TradingChart
+              chartData={chartMutation.data?.chart}
+              chartSymbol={chartMutation.data?.symbol ?? symbol}
+              positions={positions}
+              indicators={indicators}
+              indicatorSettings={indicatorSettings}
+              selectedPositionId={selectedPositionId}
+              timeframe={timeframe}
+              timeframeOptions={configQuery.data?.timeframe_options ?? []}
+              isLoading={chartMutation.isPending || loadMoreMutation.isPending}
+              loadingLabel={chartLoadingLabel}
+              onSelectPosition={setSelectedPositionId}
+              onLoadMore={handleLoadMore}
+              onTimeframeShortcut={(nextTimeframe) => handleLoadChart({ timeframe: nextTimeframe })}
+              onIndicatorToggle={handleIndicatorToggle}
+              onApplyIndicatorSettings={handleApplyIndicatorSettings}
+            />
           </div>
-        </div>
-
-        <div className="space-y-3 pt-14">
-          <section className="rounded-[24px] border border-white/10 bg-panel/78 px-5 py-4 shadow-panel backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Workspace</p>
-                <p className="mt-2 text-sm text-white">{statusMessage}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
-                  {chartMutation.data ? `${chartMutation.data.symbol} / ${chartMutation.data.timeframe}` : '等待加载'}
-                </span>
-                <span className="rounded-full border border-white/8 bg-[#0d1424] px-3 py-1.5 text-xs text-slate-300">
-                  {dataFile ? dataFile.split('/').at(-1) ?? 'CSV' : 'Exchange API'}
-                </span>
-                {errorMessage ? (
-                  <p className="rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300">
-                    {errorMessage}
-                  </p>
-                ) : (
-                  <p className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
-                    运行正常
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <TradingChart
-            chartData={chartMutation.data?.chart}
-            chartSymbol={chartMutation.data?.symbol ?? symbol}
-            positions={positions}
-            indicators={indicators}
-            indicatorSettings={indicatorSettings}
-            selectedPositionId={selectedPositionId}
-            timeframe={timeframe}
-            timeframeOptions={configQuery.data?.timeframe_options ?? []}
-            onSelectPosition={setSelectedPositionId}
-            onLoadMore={handleLoadMore}
-            onTimeframeShortcut={(nextTimeframe) => handleLoadChart({ timeframe: nextTimeframe })}
-            onIndicatorToggle={handleIndicatorToggle}
-            onApplyIndicatorSettings={handleApplyIndicatorSettings}
-          />
         </div>
       </div>
     </main>

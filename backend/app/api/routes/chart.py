@@ -82,7 +82,12 @@ def _load_positions(
 ) -> list[dict]:
     data_file_path = resolve_data_file(data_file)
     if data_file_path:
-        positions = load_positions_from_csv(data_file_path, symbol=symbol)
+        positions = load_positions_from_csv(
+            data_file_path,
+            symbol=symbol,
+            since_ms=since_ms,
+            until_ms=until_ms,
+        )
         if positions:
             return positions
 
