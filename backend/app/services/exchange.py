@@ -13,14 +13,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 
-def _common_config() -> dict:
+def _common_config(*, use_proxy: bool = True) -> dict:
     config = {
         "enableRateLimit": settings.ccxt_enable_rate_limit,
         "timeout": settings.ccxt_timeout_ms,
         "headers": {"User-Agent": settings.ccxt_user_agent},
         "verify": settings.ccxt_verify_ssl,
     }
-    if settings.exchange_proxy_url:
+    if use_proxy and settings.exchange_proxy_url:
         config["proxies"] = {
             "http": settings.exchange_proxy_url,
             "https": settings.exchange_proxy_url,
@@ -28,9 +28,9 @@ def _common_config() -> dict:
     return config
 
 
-def create_exchange(exchange_name: str = "binance", require_auth: bool = False):
+def create_exchange(exchange_name: str = "binance", require_auth: bool = False, *, use_proxy: bool = True):
     exchange_name = exchange_name.lower()
-    config = _common_config()
+    config = _common_config(use_proxy=use_proxy)
 
     if exchange_name == "binance":
         config["options"] = {
@@ -41,23 +41,23 @@ def create_exchange(exchange_name: str = "binance", require_auth: bool = False):
             "createMarketBuyOrderRequiresPrice": False,
             "fetchOHLCVWarning": False,
         }
-        if settings.binance_api_key and settings.binance_api_secret:
+        if require_auth:
+            if not settings.binance_api_key or not settings.binance_api_secret:
+                raise ValueError("缺少币安API密钥")
             config["apiKey"] = settings.binance_api_key
             config["secret"] = settings.binance_api_secret
-        elif require_auth:
-            raise ValueError("缺少币安API密钥")
         exchange = ccxt.binance(config)
     elif exchange_name == "okx":
         config["options"] = {
             "defaultType": settings.okx_default_type,
             "adjustForTimeDifference": True,
         }
-        if settings.okx_api_key and settings.okx_api_secret and settings.okx_api_passphrase:
+        if require_auth:
+            if not settings.okx_api_key or not settings.okx_api_secret or not settings.okx_api_passphrase:
+                raise ValueError("缺少OKX API密钥")
             config["apiKey"] = settings.okx_api_key
             config["secret"] = settings.okx_api_secret
             config["password"] = settings.okx_api_passphrase
-        elif require_auth:
-            raise ValueError("缺少OKX API密钥")
         exchange = ccxt.okx(config)
     else:
         raise ValueError(f"不支持的交易所: {exchange_name}")

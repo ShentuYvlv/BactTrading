@@ -15,6 +15,27 @@ from backend.app.services.exchange import create_exchange
 logger = logging.getLogger(__name__)
 
 
+def _with_public_exchange_fallback(exchange_name: str, symbol: str, action):
+    attempts = [True, False] if settings.exchange_proxy_url else [True]
+    last_exc: Exception | None = None
+
+    for use_proxy in attempts:
+        exchange = create_exchange(exchange_name, require_auth=False, use_proxy=use_proxy)
+        try:
+            normalized_symbol = normalize_symbol(exchange, symbol)
+            return action(exchange, normalized_symbol)
+        except Exception as exc:
+            last_exc = exc
+            if use_proxy:
+                logger.warning("通过代理访问交易所失败，回退直连: %s", exc)
+                continue
+            raise
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("初始化公共交易所连接失败")
+
+
 def add_technical_indicators(df: pd.DataFrame, indicator_settings: IndicatorSettings | None = None) -> pd.DataFrame:
     indicator_settings = indicator_settings or IndicatorSettings()
     df = df.copy()
@@ -93,52 +114,59 @@ def fetch_ohlcv_data(
     until: int | None,
     indicator_settings: IndicatorSettings | None = None,
 ) -> pd.DataFrame:
-    exchange = create_exchange(exchange_name, require_auth=False)
-    symbol = normalize_symbol(exchange, symbol)
     indicator_settings = indicator_settings or IndicatorSettings()
     indicator_signature = (
         f"ema{'-'.join(map(str, indicator_settings.ema.periods))}_"
         f"rsi{indicator_settings.rsi.period}_"
         f"macd{indicator_settings.macd.fast_period}_{indicator_settings.macd.slow_period}_{indicator_settings.macd.signal_period}"
     )
-    cache_key = get_cache_key(symbol, timeframe, since, until, indicator_signature=indicator_signature)
-    cached = get_cached_data(cache_key)
-    if cached is not None and not cached.empty:
-        return cached
 
-    all_ohlcv = []
-    batch_limit = 1000
-    if since and until:
-        try:
-            all_ohlcv = exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=timeframe,
-                limit=batch_limit,
-                params={"startTime": since, "endTime": until},
-            )
-        except Exception:
-            current_since = since
-            while current_since < until:
-                batch = exchange.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=batch_limit, params={"since": current_since})
-                if not batch:
-                    break
-                batch = [candle for candle in batch if candle[0] <= until]
-                all_ohlcv.extend(batch)
-                if len(batch) < batch_limit:
-                    break
-                current_since = batch[-1][0] + 1
-                time.sleep(0.5)
-    else:
-        all_ohlcv = exchange.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=batch_limit)
+    def _load(exchange, normalized_symbol: str) -> pd.DataFrame:
+        cache_key = get_cache_key(normalized_symbol, timeframe, since, until, indicator_signature=indicator_signature)
+        cached = get_cached_data(cache_key)
+        if cached is not None and not cached.empty:
+            return cached
 
-    if not all_ohlcv:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        all_ohlcv = []
+        batch_limit = 1000
+        if since and until:
+            try:
+                all_ohlcv = exchange.fetch_ohlcv(
+                    symbol=normalized_symbol,
+                    timeframe=timeframe,
+                    limit=batch_limit,
+                    params={"startTime": since, "endTime": until},
+                )
+            except Exception:
+                current_since = since
+                while current_since < until:
+                    batch = exchange.fetch_ohlcv(
+                        symbol=normalized_symbol,
+                        timeframe=timeframe,
+                        limit=batch_limit,
+                        params={"since": current_since},
+                    )
+                    if not batch:
+                        break
+                    batch = [candle for candle in batch if candle[0] <= until]
+                    all_ohlcv.extend(batch)
+                    if len(batch) < batch_limit:
+                        break
+                    current_since = batch[-1][0] + 1
+                    time.sleep(0.5)
+        else:
+            all_ohlcv = exchange.fetch_ohlcv(symbol=normalized_symbol, timeframe=timeframe, limit=batch_limit)
 
-    df = pd.DataFrame(all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df = add_technical_indicators(df, indicator_settings=indicator_settings)
-    save_to_cache(cache_key, df)
-    return df
+        if not all_ohlcv:
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+        df = pd.DataFrame(all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df = add_technical_indicators(df, indicator_settings=indicator_settings)
+        save_to_cache(cache_key, df)
+        return df
+
+    return _with_public_exchange_fallback(exchange_name, symbol, _load)
 
 
 def load_more_ohlcv(
@@ -151,18 +179,25 @@ def load_more_ohlcv(
 ) -> dict:
     since = last_timestamp * 1000 + 1 if last_timestamp < 10_000_000_000 else last_timestamp + 1
     until = min(since + timeframe_increment_ms * candles_to_load, int(datetime.now().timestamp() * 1000))
-    exchange = create_exchange(exchange_name, require_auth=False)
-    symbol = normalize_symbol(exchange, symbol)
-    ohlcv = exchange.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=1000, params={"startTime": since, "endTime": until})
-    if not ohlcv:
-        return {"chart": None, "added": 0}
 
-    df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df = add_technical_indicators(df)
-    append_to_cache(symbol, timeframe, df)
-    payload = prepare_chart_payload(df)
-    added = max(len(payload["candlestick"]) - 1, 0)
-    for key in payload:
-        payload[key] = payload[key][1:]
-    return {"chart": payload, "added": added}
+    def _load(exchange, normalized_symbol: str) -> dict:
+        ohlcv = exchange.fetch_ohlcv(
+            symbol=normalized_symbol,
+            timeframe=timeframe,
+            limit=1000,
+            params={"startTime": since, "endTime": until},
+        )
+        if not ohlcv:
+            return {"chart": None, "added": 0}
+
+        df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df = add_technical_indicators(df)
+        append_to_cache(normalized_symbol, timeframe, df)
+        payload = prepare_chart_payload(df)
+        added = max(len(payload["candlestick"]) - 1, 0)
+        for key in payload:
+            payload[key] = payload[key][1:]
+        return {"chart": payload, "added": added}
+
+    return _with_public_exchange_fallback(exchange_name, symbol, _load)

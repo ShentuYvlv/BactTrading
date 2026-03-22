@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_trades(exchange_name: str, symbol: str, since: int | None, until: int | None, limit: int = 100) -> pd.DataFrame:
-    exchange = create_exchange(exchange_name, require_auth=False)
+    try:
+        exchange = create_exchange(exchange_name, require_auth=True)
+    except ValueError:
+        return pd.DataFrame()
     if not getattr(exchange, "apiKey", None) or not getattr(exchange, "secret", None):
         return pd.DataFrame()
 
