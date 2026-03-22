@@ -594,17 +594,10 @@ export function TradingChart({
       if (clickedTime === null) {
         return
       }
-      const candleSpacing =
-        chartData.candlestick.length > 1
-          ? Math.max(chartData.candlestick[1].time - chartData.candlestick[0].time, 60)
-          : 3600
 
-      const matchedPosition =
-        positions.find((position) => position.open_time === clickedTime || position.close_time === clickedTime) ??
-        findNearestPositionByTime(positions, clickedTime, candleSpacing * 2)
-
-      if (matchedPosition) {
-        onSelectPosition(matchedPosition.position_id)
+      const markerPositionId = markerPositionIndex.get(clickedTime) ?? null
+      if (markerPositionId) {
+        onSelectPosition(markerPositionId)
         return
       }
       setSelectedDrawingId(null)
@@ -3286,28 +3279,6 @@ function normalizeClickedTime(time: unknown) {
     return Math.floor(Date.UTC(businessDay.year, businessDay.month - 1, businessDay.day) / 1000)
   }
   return null
-}
-
-function findNearestPositionByTime(positions: PositionRecord[], clickedTime: number, maxDeltaSeconds = 2 * 60 * 60) {
-  if (positions.length === 0) {
-    return null
-  }
-  let nearest: PositionRecord | null = null
-  let minDelta = Number.POSITIVE_INFINITY
-
-  positions.forEach((position) => {
-    const deltas = [
-      Math.abs(position.open_time - clickedTime),
-      position.close_time === null ? Number.POSITIVE_INFINITY : Math.abs(position.close_time - clickedTime),
-    ]
-    const delta = Math.min(...deltas)
-    if (delta < minDelta && delta <= maxDeltaSeconds) {
-      minDelta = delta
-      nearest = position
-    }
-  })
-
-  return nearest
 }
 
 function buildPaneOverlays(indicators: IndicatorState, indicatorSettings: IndicatorSettings) {
