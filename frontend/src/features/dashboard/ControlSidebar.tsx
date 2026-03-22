@@ -5,7 +5,6 @@ import type {
   DataFileItem,
   IndicatorSettings,
   IndicatorState,
-  RebuildRequest,
   SymbolItem,
 } from '../../types/api'
 import { cx } from '../../lib/format'
@@ -23,17 +22,13 @@ interface ControlSidebarProps {
   minTrades: number
   indicators: IndicatorState
   indicatorSettings: IndicatorSettings
-  rebuildForm: RebuildRequest
   loadingChart: boolean
   loadingMore: boolean
-  rebuilding: boolean
   onFieldChange: (field: 'exchange' | 'dataFile' | 'symbol' | 'timeframe' | 'startDate' | 'endDate' | 'minTrades', value: string | number) => void
   onIndicatorToggle: (key: keyof IndicatorState) => void
   onIndicatorSettingsChange: (settings: IndicatorSettings) => void
   onLoadChart: () => void
   onLoadMore: () => void
-  onRebuildFieldChange: (field: keyof RebuildRequest, value: string | number) => void
-  onRebuild: () => void
 }
 
 const indicatorLabels: Array<{ key: keyof IndicatorState; label: string }> = [
@@ -85,17 +80,13 @@ export function ControlSidebar({
   minTrades,
   indicators,
   indicatorSettings,
-  rebuildForm,
   loadingChart,
   loadingMore,
-  rebuilding,
   onFieldChange,
   onIndicatorToggle,
   onIndicatorSettingsChange,
   onLoadChart,
   onLoadMore,
-  onRebuildFieldChange,
-  onRebuild,
 }: ControlSidebarProps) {
   return (
     <aside className="flex h-full flex-col gap-6 rounded-[28px] border border-white/10 bg-panel/90 p-5 shadow-panel backdrop-blur">
@@ -308,78 +299,6 @@ export function ControlSidebar({
             {loadingMore ? '同步中...' : '同步更多'}
           </button>
         </div>
-      </section>
-
-      <section className="space-y-4 rounded-[24px] border border-white/8 bg-[#0d1424] p-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">重建仓位</p>
-          <p className="mt-1 text-sm text-slate-400">
-            直接调用新的 API，由后端执行 `getPosition.py` 任务并写入 `data/`。
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="交易所">
-            <select
-              className={inputClassName()}
-              value={rebuildForm.exchange}
-              onChange={(event) => onRebuildFieldChange('exchange', event.target.value)}
-            >
-              {(config?.exchange_options ?? []).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="线程数">
-            <input
-              className={inputClassName()}
-              min={1}
-              type="number"
-              value={rebuildForm.threads}
-              onChange={(event) => onRebuildFieldChange('threads', Number(event.target.value))}
-            />
-          </Field>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="开始日期">
-            <input
-              className={inputClassName()}
-              type="date"
-              value={rebuildForm.start_date}
-              onChange={(event) => onRebuildFieldChange('start_date', event.target.value)}
-            />
-          </Field>
-          <Field label="结束日期">
-            <input
-              className={inputClassName()}
-              type="date"
-              value={rebuildForm.end_date}
-              onChange={(event) => onRebuildFieldChange('end_date', event.target.value)}
-            />
-          </Field>
-        </div>
-
-        <Field label="最大重试">
-          <input
-            className={inputClassName()}
-            min={0}
-            type="number"
-            value={rebuildForm.max_retries}
-            onChange={(event) => onRebuildFieldChange('max_retries', Number(event.target.value))}
-          />
-        </Field>
-
-        <button
-          className="w-full rounded-2xl border border-accent/40 bg-accent/15 px-4 py-3 text-sm font-medium text-accentSoft transition hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={rebuilding}
-          type="button"
-          onClick={onRebuild}
-        >
-          {rebuilding ? '正在重建...' : '开始重建仓位 CSV'}
-        </button>
       </section>
     </aside>
   )

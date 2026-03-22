@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     chart_default_symbol: str = "NXPC/USDT:USDT"
     chart_fallback_symbol: str = "NXPC/USDT:USDT"
-    chart_default_timeframe: str = "1h"
+    chart_default_timeframe: str = "30m"
     chart_default_start_date: date | None = None
     chart_default_end_date: date | None = None
     chart_min_trades: int = 5

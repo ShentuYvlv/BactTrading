@@ -1,14 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
-import { loadChart, loadMoreChart, rebuildPositions, fetchConfig, fetchDataFiles, fetchSymbols } from './lib/api'
-import type {
-  IndicatorKey,
-  IndicatorSettings,
-  IndicatorState,
-  PositionRecord,
-  RebuildRequest,
-} from './types/api'
+import { loadChart, loadMoreChart, fetchConfig, fetchDataFiles, fetchSymbols } from './lib/api'
+import type { IndicatorKey, IndicatorSettings, IndicatorState, PositionRecord } from './types/api'
 import { ControlSidebar } from './features/dashboard/ControlSidebar'
 import { StatusOverview } from './features/dashboard/StatusOverview'
 import { TradingChart } from './features/chart/TradingChart'
@@ -17,7 +11,7 @@ import { PositionNavigator } from './features/positions/PositionNavigator'
 const DEFAULT_INDICATORS: IndicatorState = {
   showEma: true,
   showVolume: true,
-  showRsi: true,
+  showRsi: false,
   showMacd: false,
   showTradeMarkers: true,
 }
@@ -29,11 +23,10 @@ const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
 }
 
 function App() {
-  const queryClient = useQueryClient()
   const [exchange, setExchange] = useState('binance')
   const [dataFile, setDataFile] = useState<string | null>(null)
   const [symbol, setSymbol] = useState('')
-  const [timeframe, setTimeframe] = useState('1h')
+  const [timeframe, setTimeframe] = useState('30m')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [minTrades, setMinTrades] = useState(5)
@@ -43,13 +36,6 @@ function App() {
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
   const lastAppliedDateRangeFileRef = useRef<string | null>(null)
   const lastAppliedSymbolWindowRef = useRef<string | null>(null)
-  const [rebuildForm, setRebuildForm] = useState<RebuildRequest>({
-    exchange: 'binance',
-    start_date: '',
-    end_date: '',
-    threads: 5,
-    max_retries: 3,
-  })
 
   const configQuery = useQuery({
     queryKey: ['config'],
@@ -94,15 +80,6 @@ function App() {
     onError: () => {},
   })
 
-  const rebuildMutation = useMutation({
-    mutationFn: rebuildPositions,
-    onSuccess: async (data) => {
-      await queryClient.invalidateQueries({ queryKey: ['data-files'] })
-      setDataFile(data.file_path)
-    },
-    onError: () => {},
-  })
-
   useEffect(() => {
     const defaults = configQuery.data?.chart_defaults
     if (!defaults) {
@@ -113,12 +90,6 @@ function App() {
     setEndDate((current) => current || defaults.end_date)
     setMinTrades((current) => current || defaults.min_trades)
     setSymbol((current) => current || defaults.symbol)
-    setRebuildForm((current) => ({
-      ...current,
-      exchange,
-      start_date: current.start_date || defaults.start_date,
-      end_date: current.end_date || defaults.end_date,
-    }))
   }, [configQuery.data, exchange])
 
   useEffect(() => {
@@ -146,11 +117,6 @@ function App() {
     setStartDate(dateRange.start_date)
     setEndDate(dateRange.end_date)
     setHasAutoLoaded(false)
-    setRebuildForm((current) => ({
-      ...current,
-      start_date: current.start_date || dateRange.start_date,
-      end_date: current.end_date || dateRange.end_date,
-    }))
     lastAppliedDateRangeFileRef.current = dataFile
   }, [dataFile, symbolsQuery.data?.date_range])
 
@@ -256,7 +222,6 @@ function App() {
   ) {
     if (field === 'exchange') {
       setExchange(String(value))
-      setRebuildForm((current) => ({ ...current, exchange: String(value) }))
       setHasAutoLoaded(false)
       return
     }
@@ -301,17 +266,6 @@ function App() {
     setHasAutoLoaded(false)
   }
 
-  function handleRebuildFieldChange(field: keyof RebuildRequest, value: string | number) {
-    setRebuildForm((current) => ({
-      ...current,
-      [field]: value,
-    }))
-  }
-
-  function handleRebuild() {
-    rebuildMutation.mutate(rebuildForm)
-  }
-
   return (
     <main className="min-h-screen bg-ink bg-grid bg-[size:36px_36px] text-slate-100">
       <div className="mx-auto min-h-screen max-w-[1920px] px-3 py-3">
@@ -330,17 +284,13 @@ function App() {
               minTrades={minTrades}
               indicators={indicators}
               indicatorSettings={indicatorSettings}
-              rebuildForm={rebuildForm}
               loadingChart={chartMutation.isPending}
               loadingMore={loadMoreMutation.isPending}
-              rebuilding={rebuildMutation.isPending}
               onFieldChange={handleFieldChange}
               onIndicatorToggle={handleIndicatorToggle}
               onIndicatorSettingsChange={handleIndicatorSettingsChange}
               onLoadChart={() => handleLoadChart()}
               onLoadMore={handleLoadMore}
-              onRebuildFieldChange={handleRebuildFieldChange}
-              onRebuild={handleRebuild}
             />
 
             <StatusOverview

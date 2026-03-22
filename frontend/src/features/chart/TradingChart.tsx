@@ -66,6 +66,7 @@ interface LegendState {
   low: string
   close: string
   volume: string
+  emaItems: Array<{ period: number; value: string; color: string }>
   ema: string
   rsi: string
   macd: string
@@ -381,6 +382,9 @@ export function TradingChart({
         rightOffset: 10,
         barSpacing: 10,
       },
+      localization: {
+        timeFormatter: (time: number | { year: number; month: number; day: number }) => formatChartTimeValue(time),
+      },
       rightPriceScale: {
         borderColor: '#263242',
         entireTextOnly: true,
@@ -414,6 +418,7 @@ export function TradingChart({
             lineStyle: LineStyle.Solid,
             priceLineVisible: false,
             lastValueVisible: false,
+            crosshairMarkerVisible: false,
           },
           0,
         )
@@ -455,6 +460,7 @@ export function TradingChart({
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
+          crosshairMarkerVisible: false,
         },
         paneIndex,
       )
@@ -487,6 +493,7 @@ export function TradingChart({
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
+          crosshairMarkerVisible: false,
         },
         paneIndex,
       )
@@ -498,6 +505,7 @@ export function TradingChart({
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
+          crosshairMarkerVisible: false,
         },
         paneIndex,
       )
@@ -564,6 +572,7 @@ export function TradingChart({
         low: formatNumber(candle.low),
         close: formatNumber(candle.close),
         volume: formatCompactNumber(volume, 2),
+        emaItems: buildEmaLegendItems(chartData, dataIndexes, candleTime),
         ema: formatEmaLegend(chartData, dataIndexes, candleTime),
         rsi: formatNumber(rsi),
         macd: formatNumber(macd),
@@ -783,7 +792,7 @@ export function TradingChart({
                 className={cx(
                   'rounded-full px-3 py-1.5 text-sm transition',
                   timeframe === option.value
-                    ? 'bg-white/12 text-white'
+                    ? 'bg-[#323d4f] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
                     : 'text-slate-300 hover:bg-white/8 hover:text-white',
                 )}
                 type="button"
@@ -824,18 +833,16 @@ export function TradingChart({
       </div>
 
       <div className="flex min-h-[52px] items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-white/8 bg-[#0f1622] px-4 py-3 text-sm whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex shrink-0 items-center gap-2 text-white">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400/90" />
-          <span className="font-medium">
-            {chartSymbol} · {timeframe} · Review Workspace
-          </span>
-        </div>
-        <span className="shrink-0 font-mono tabular-nums text-slate-400">{legend?.time ?? '--'}</span>
-        <span className={cx('shrink-0 font-mono font-medium tabular-nums', legend?.isUp ? 'text-emerald-400' : 'text-rose-400')}>
-          开 {legend?.open ?? '--'} 高 {legend?.high ?? '--'} 低 {legend?.low ?? '--'} 收 {legend?.close ?? '--'} {legend?.delta ?? '--'} ({legend?.deltaPct ?? '--'})
-        </span>
         <span className="shrink-0 font-mono tabular-nums text-slate-400">Vol {legend?.volume ?? '--'}</span>
-        <span className="shrink-0 font-mono tabular-nums text-[#e1d35c]">EMA {legend?.ema ?? '--'}</span>
+        {legend?.emaItems?.length ? (
+          legend.emaItems.map((item) => (
+            <span key={item.period} className="shrink-0 font-mono tabular-nums" style={{ color: item.color }}>
+              EMA {item.period} {item.value}
+            </span>
+          ))
+        ) : (
+          <span className="shrink-0 font-mono tabular-nums text-[#e1d35c]">EMA --</span>
+        )}
         <span className="shrink-0 font-mono tabular-nums text-[#2d60d8]">RSI {legend?.rsi ?? '--'}</span>
         <span className="shrink-0 font-mono tabular-nums text-[#53b36b]">MACD {legend?.macd ?? '--'}</span>
       </div>
@@ -3022,19 +3029,47 @@ function findValueAtTime(
 }
 
 function formatEpoch(time: number) {
-  const formatter = new Intl.DateTimeFormat('zh-CN', {
+  return formatChartTimeValue(time)
+}
+
+function formatChartTimeValue(
+  time:
+    | number
+    | {
+        year: number
+        month: number
+        day: number
+      },
+) {
+  const date =
+    typeof time === 'number'
+      ? new Date(time * 1000)
+      : new Date(Date.UTC(time.year, time.month - 1, time.day))
+  const shanghaiText = new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Shanghai',
-    weekday: 'short',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  })
-  const parts = formatter.formatToParts(new Date(time * 1000))
-  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${partMap.weekday ?? ''} ${partMap.year ?? '----'}-${partMap.month ?? '--'}-${partMap.day ?? '--'} ${partMap.hour ?? '--'}:${partMap.minute ?? '--'}`
+  }).format(date)
+  const [datePart = '----/--/--', timePart = '--:--'] = shanghaiText.replace(' ', 'T').split('T')
+  const [year = '----', month = '--', day = '--'] = datePart.split('-')
+  const weekdayIndex = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai',
+    weekday: 'short',
+  }).format(date)
+  const weekdayMap: Record<string, string> = {
+    Sun: '周日',
+    Mon: '周一',
+    Tue: '周二',
+    Wed: '周三',
+    Thu: '周四',
+    Fri: '周五',
+    Sat: '周六',
+  }
+  return `${weekdayMap[weekdayIndex] ?? '周--'} ${year}-${month}-${day} ${timePart}`
 }
 
 function formatSignedNumber(value: number, digits = 2) {
@@ -3157,6 +3192,7 @@ function buildLegend(
     low: formatNumber(candle.low),
     close: formatNumber(candle.close),
     volume: formatCompactNumber(findValueAtTime(chartData.volume, time, dataIndexes?.volume), 2),
+    emaItems: buildEmaLegendItems(chartData, dataIndexes, time),
     ema: formatEmaLegend(chartData, dataIndexes, time),
     rsi: formatNumber(findValueAtTime(chartData.rsi, time, dataIndexes?.rsi)),
     macd: formatNumber(findValueAtTime(chartData.macd, time, dataIndexes?.macd)),
@@ -3193,23 +3229,33 @@ function formatEmaLegend(
   dataIndexes: ReturnType<typeof buildDataIndexes>,
   time: number,
 ) {
-  const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
-  if (!emaSeriesList.length) {
+  const items = buildEmaLegendItems(chartData, dataIndexes, time)
+  if (!items.length) {
     return '--'
   }
+  return items.map((item) => `${item.period}: ${item.value}`).join('  ')
+}
 
-  const items = emaSeriesList
-    .map((series) => {
+function buildEmaLegendItems(
+  chartData: ChartPayload,
+  dataIndexes: ReturnType<typeof buildDataIndexes>,
+  time: number,
+) {
+  const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
+  return emaSeriesList
+    .map((series, index) => {
       const seriesIndex = dataIndexes?.ema.get(series.period)
       const value = findValueAtTime(series.data, time, seriesIndex)
       if (value === null || value === undefined) {
         return null
       }
-      return `${series.period}: ${formatNumber(value)}`
+      return {
+        period: series.period,
+        value: formatNumber(value),
+        color: EMA_LINE_COLORS[index % EMA_LINE_COLORS.length],
+      }
     })
-    .filter(Boolean)
-
-  return items.length > 0 ? items.join('  ') : '--'
+    .filter((item): item is { period: number; value: string; color: string } => Boolean(item))
 }
 
 function updateLegendState(
@@ -3217,7 +3263,7 @@ function updateLegendState(
   lastLegendKeyRef: MutableRefObject<string>,
   nextLegend: LegendState,
 ) {
-  const nextKey = Object.values(nextLegend).join('|')
+  const nextKey = JSON.stringify(nextLegend)
   if (lastLegendKeyRef.current === nextKey) {
     return
   }

@@ -146,3 +146,4 @@ cd frontend && npm run dev
 - 旧的 `lightweight_charts.py` 不再是主入口。
 - 当前主入口是 `start_server.py -> backend.app.main:app`。
 - 如果代理留空，会直接直连交易所。
+- 交易所连接、代理和 ccxt 的排障说明见 [docs/交易所连接说明.md](/Users/zed/all%20code/A我的/BactTrading/docs/交易所连接说明.md)。
