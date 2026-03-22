@@ -360,7 +360,7 @@ export function TradingChart({
         horzLines: { color: 'rgba(148, 163, 184, 0.18)' },
       },
       crosshair: {
-        mode: CrosshairMode.MagnetOHLC,
+        mode: CrosshairMode.Normal,
         vertLine: { color: 'rgba(91, 212, 201, 0.72)', width: 1, style: 2 },
         horzLine: { color: 'rgba(91, 212, 201, 0.3)', width: 1, style: 2 },
       },
