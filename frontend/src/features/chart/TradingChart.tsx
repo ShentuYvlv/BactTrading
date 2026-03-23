@@ -5,12 +5,10 @@ import {
   HistogramSeries,
   LineStyle,
   LineSeries,
-  createSeriesMarkers,
   createChart,
   type IChartApi,
   type ISeriesApi,
   type MouseEventParams,
-  type SeriesMarker,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import {
@@ -31,7 +29,7 @@ import {
   TrendingUp,
   ArrowUpRight,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type MutableRefObject, type SetStateAction } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type MutableRefObject, type SetStateAction } from 'react'
 
 import { cx, formatCompactNumber, formatNumber } from '../../lib/format'
 import type {
@@ -136,6 +134,18 @@ type DragState = {
   startY: number
   originalPoints: DrawingPoint[]
   handleIndex: number | null
+}
+type TradeAnnotationKind = 'open' | 'close'
+type RenderedTradeAnnotation = {
+  key: string
+  x: number
+  y: number
+  labelX: number
+  labelY: number
+  side: PositionRecord['side']
+  kind: TradeAnnotationKind
+  text: string
+  color: string
 }
 
 const QUICK_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
@@ -244,6 +254,20 @@ export function TradingChart({
     const preview = buildDraftDrawingObject(draftDrawing)
     return preview ? projectDrawing(preview, chartRefs.current, pricePaneHeight, overlayRevision) : null
   }, [draftDrawing, overlayRevision, pricePaneHeight])
+  const renderedTradeAnnotations = useMemo(
+    () =>
+      chartData
+        ? projectTradeAnnotations(
+            positions,
+            chartRefs.current,
+            chartData.candlestick,
+            chartData.candlestick.map((item) => item.time),
+            pricePaneHeight,
+            chartContainerRef.current?.clientWidth ?? 0,
+          )
+        : [],
+    [chartData, overlayRevision, positions, pricePaneHeight],
+  )
 
   useEffect(() => {
     if (selectedIndex >= 0) {
@@ -531,9 +555,6 @@ export function TradingChart({
         })),
       )
     }
-
-    const markerTimes = chartData.candlestick.map((item) => item.time)
-    createSeriesMarkers(candleSeries, indicators.showTradeMarkers ? buildMarkers(positions, markerTimes) : [])
 
     chart.timeScale().fitContent()
     applyPaneWeights(chart, indicators)
@@ -959,6 +980,7 @@ export function TradingChart({
             }}
           >
             <svg className="h-full w-full">
+              <TradeAnnotationsLayer annotations={renderedTradeAnnotations} visible={indicators.showTradeMarkers} />
               {renderedDrawings.map((drawing) => (
                 <DrawingShape
                   key={drawing.id}
@@ -1645,6 +1667,82 @@ function PaneHeader({
     </div>
   )
 }
+
+function TradeAnnotation({ annotation }: { annotation: RenderedTradeAnnotation }) {
+  const isOpen = annotation.kind === 'open'
+  const lineDash = isOpen ? undefined : '4 4'
+  const labelWidth = Math.max(48, annotation.text.length * 11 + 14)
+  const labelHeight = 20
+  const labelLeft = annotation.labelX >= annotation.x ? annotation.labelX : annotation.labelX - labelWidth
+  const labelTop = annotation.labelY - labelHeight / 2
+  const textAnchor = annotation.labelX >= annotation.x ? 'start' : 'end'
+  const textX = annotation.labelX >= annotation.x ? labelLeft + 8 : labelLeft + labelWidth - 8
+
+  return (
+    <g className="pointer-events-none">
+      <line
+        x1={annotation.x}
+        x2={annotation.labelX}
+        y1={annotation.y}
+        y2={annotation.labelY}
+        stroke={annotation.color}
+        strokeDasharray={lineDash}
+        strokeOpacity={0.9}
+        strokeWidth={1.2}
+      />
+      <circle
+        cx={annotation.x}
+        cy={annotation.y}
+        fill={isOpen ? annotation.color : '#08111d'}
+        r={isOpen ? 3.5 : 3}
+        stroke={annotation.color}
+        strokeWidth={1.6}
+      />
+      <rect
+        fill="rgba(8, 17, 29, 0.9)"
+        height={labelHeight}
+        rx={10}
+        ry={10}
+        stroke={annotation.color}
+        strokeOpacity={0.85}
+        strokeWidth={1}
+        width={labelWidth}
+        x={labelLeft}
+        y={labelTop}
+      />
+      <text
+        dominantBaseline="middle"
+        fill={annotation.color}
+        fontSize="11"
+        fontWeight="600"
+        textAnchor={textAnchor}
+        x={textX}
+        y={annotation.labelY}
+      >
+        {annotation.text}
+      </text>
+    </g>
+  )
+}
+
+const TradeAnnotationsLayer = memo(function TradeAnnotationsLayer({
+  annotations,
+  visible,
+}: {
+  annotations: RenderedTradeAnnotation[]
+  visible: boolean
+}) {
+  if (!visible || annotations.length === 0) {
+    return null
+  }
+  return (
+    <>
+      {annotations.map((annotation) => (
+        <TradeAnnotation key={annotation.key} annotation={annotation} />
+      ))}
+    </>
+  )
+})
 
 function DrawingObjectSettingsPanel({
   drawing,
@@ -2922,32 +3020,6 @@ function syncChartMetrics(
   }
 }
 
-function buildMarkers(positions: PositionRecord[], candleTimes: number[]): SeriesMarker<UTCTimestamp>[] {
-  return positions.flatMap((position, index) => {
-    const openMarkerTime = alignMarkerTime(position.open_time, candleTimes)
-    const openMarker: SeriesMarker<UTCTimestamp> = {
-      time: toUtcTime(openMarkerTime),
-      position: position.side === 'long' ? 'belowBar' : 'aboveBar',
-      shape: position.side === 'long' ? 'arrowUp' : 'arrowDown',
-      color: position.side === 'long' ? '#22c55e' : '#ef4444',
-      text: `#${index + 1} 开仓`,
-    }
-    const closeMarkers =
-      position.close_time === null
-        ? []
-        : [
-            {
-              time: toUtcTime(alignMarkerTime(position.close_time, candleTimes)),
-              position: position.side === 'long' ? 'aboveBar' : 'belowBar',
-              shape: 'circle',
-              color: position.is_profit ? '#22c55e' : '#ef4444',
-              text: `#${index + 1} 平仓`,
-            } satisfies SeriesMarker<UTCTimestamp>,
-          ]
-    return [openMarker, ...closeMarkers]
-  })
-}
-
 function buildMarkerPositionIndex(positions: PositionRecord[], candleTimes: number[]) {
   const index = new Map<number, string>()
   positions.forEach((position) => {
@@ -2983,6 +3055,271 @@ function alignMarkerTime(targetTime: number, candleTimes: number[]) {
   }
 
   return lastTime
+}
+
+function projectTradeAnnotations(
+  positions: PositionRecord[],
+  chartRefs: ChartRefs | null,
+  candlesticks: Array<{ time: number; open: number; high: number; low: number; close: number }>,
+  candleTimes: number[],
+  pricePaneHeight: number,
+  containerWidth: number,
+) {
+  if (!chartRefs || pricePaneHeight <= 0) {
+    return [] as RenderedTradeAnnotation[]
+  }
+
+  const chart = chartRefs.chart
+  const candleSeries = chartRefs.candleSeries
+  const visibleRange = chart.timeScale().getVisibleRange()
+  const visibleFrom = visibleRange ? Number(visibleRange.from) : null
+  const visibleTo = visibleRange ? Number(visibleRange.to) : null
+  const candleObstacles = buildCandleObstacles(candlesticks, chartRefs)
+  const rawAnnotations = positions.flatMap((position, index) => {
+    const items: Array<{
+      key: string
+      time: number
+      price: number | null
+      side: PositionRecord['side']
+      kind: TradeAnnotationKind
+      text: string
+      color: string
+    }> = [
+      {
+        key: `${position.position_id}:open`,
+        time: alignMarkerTime(position.open_time, candleTimes),
+        price: position.open_price,
+        side: position.side,
+        kind: 'open',
+        text: position.side === 'long' ? `多头 #${index + 1}` : `空头 #${index + 1}`,
+        color: position.side === 'long' ? '#22c55e' : '#f97316',
+      },
+    ]
+    if (position.close_time !== null && position.close_price !== null) {
+      items.push({
+        key: `${position.position_id}:close`,
+        time: alignMarkerTime(position.close_time, candleTimes),
+        price: position.close_price,
+        side: position.side,
+        kind: 'close',
+        text: position.side === 'long' ? `平多 #${index + 1}` : `平空 #${index + 1}`,
+        color: position.side === 'long' ? '#16a34a' : '#ea580c',
+      })
+    }
+    return items.filter((item) => {
+      if (visibleFrom === null || visibleTo === null) {
+        return true
+      }
+      return item.time >= visibleFrom && item.time <= visibleTo
+    })
+  })
+
+  const bucketCounts = new Map<string, number>()
+  const occupiedLabelRects: Array<{ left: number; right: number; top: number; bottom: number }> = []
+
+  return rawAnnotations.flatMap((annotation) => {
+    if (annotation.price === null) {
+      return []
+    }
+
+    const x = chart.timeScale().timeToCoordinate(toUtcTime(annotation.time))
+    const y = candleSeries.priceToCoordinate(annotation.price)
+    if (x === null || y === null) {
+      return []
+    }
+
+    const bucketKey = `${annotation.time}:${annotation.side}:${annotation.kind}`
+    const slot = bucketCounts.get(bucketKey) ?? 0
+    bucketCounts.set(bucketKey, slot + 1)
+
+    const isOpen = annotation.kind === 'open'
+    const baseOffsetY = isOpen
+      ? annotation.side === 'long'
+        ? 28
+        : -28
+      : annotation.side === 'long'
+        ? -22
+        : 22
+    const stackOffsetY = slot * 16 * (baseOffsetY >= 0 ? 1 : -1)
+    const labelMetrics = resolveTradeAnnotationPlacement({
+      x,
+      y,
+      preferredOffsetY: baseOffsetY + stackOffsetY,
+      text: annotation.text,
+      containerWidth,
+      pricePaneHeight,
+      candleObstacles,
+      occupiedLabelRects,
+    })
+    occupiedLabelRects.push(labelMetrics.rect)
+
+    return [
+      {
+        key: annotation.key,
+        x,
+        y,
+        labelX: labelMetrics.anchorX,
+        labelY: labelMetrics.anchorY,
+        side: annotation.side,
+        kind: annotation.kind,
+        text: annotation.text,
+        color: annotation.color,
+      } satisfies RenderedTradeAnnotation,
+    ]
+  })
+}
+
+function buildCandleObstacles(
+  candlesticks: Array<{ time: number; open: number; high: number; low: number; close: number }>,
+  chartRefs: ChartRefs,
+) {
+  const chart = chartRefs.chart
+  const candleSeries = chartRefs.candleSeries
+  const projected = candlesticks
+    .map((candle) => {
+      const x = chart.timeScale().timeToCoordinate(toUtcTime(candle.time))
+      const highY = candleSeries.priceToCoordinate(candle.high)
+      const lowY = candleSeries.priceToCoordinate(candle.low)
+      const bodyTopY = candleSeries.priceToCoordinate(Math.max(candle.open, candle.close))
+      const bodyBottomY = candleSeries.priceToCoordinate(Math.min(candle.open, candle.close))
+      if (x === null || highY === null || lowY === null || bodyTopY === null || bodyBottomY === null) {
+        return null
+      }
+      return {
+        x: Number(x),
+        top: Math.min(highY, bodyTopY),
+        bottom: Math.max(lowY, bodyBottomY),
+      }
+    })
+    .filter((item): item is { x: number; top: number; bottom: number } => item !== null)
+
+  if (projected.length === 0) {
+    return [] as Array<{ left: number; right: number; top: number; bottom: number }>
+  }
+
+  const spacings: number[] = []
+  for (let index = 1; index < projected.length; index += 1) {
+    const spacing = projected[index].x - projected[index - 1].x
+    if (spacing > 0) {
+      spacings.push(spacing)
+    }
+  }
+  const avgSpacing =
+    spacings.length > 0 ? spacings.reduce((sum, value) => sum + value, 0) / spacings.length : 10
+  const halfWidth = clamp(avgSpacing * 0.42, 4, 10)
+
+  return projected.map((item) => ({
+    left: item.x - halfWidth,
+    right: item.x + halfWidth,
+    top: item.top - 4,
+    bottom: item.bottom + 4,
+  }))
+}
+
+function filterNearbyObstacles(
+  obstacles: Array<{ left: number; right: number; top: number; bottom: number }>,
+  left: number,
+  right: number,
+) {
+  const padding = 28
+  return obstacles.filter((obstacle) => obstacle.right >= left - padding && obstacle.left <= right + padding)
+}
+
+function resolveTradeAnnotationPlacement({
+  x,
+  y,
+  preferredOffsetY,
+  text,
+  containerWidth,
+  pricePaneHeight,
+  candleObstacles,
+  occupiedLabelRects,
+}: {
+  x: number
+  y: number
+  preferredOffsetY: number
+  text: string
+  containerWidth: number
+  pricePaneHeight: number
+  candleObstacles: Array<{ left: number; right: number; top: number; bottom: number }>
+  occupiedLabelRects: Array<{ left: number; right: number; top: number; bottom: number }>
+}) {
+  const labelWidth = Math.max(48, text.length * 11 + 14)
+  const labelHeight = 20
+  const marginX = 12
+  const marginY = 10
+  const verticalCandidates = [
+    preferredOffsetY,
+    preferredOffsetY + (preferredOffsetY >= 0 ? 18 : -18),
+    preferredOffsetY + (preferredOffsetY >= 0 ? -18 : 18),
+    preferredOffsetY * 1.45,
+    -preferredOffsetY,
+  ]
+  const horizontalCandidates = [42, 56, -42, -56]
+
+  let best: {
+    anchorX: number
+    anchorY: number
+    rect: { left: number; right: number; top: number; bottom: number }
+    score: number
+  } | null = null
+
+  horizontalCandidates.forEach((offsetX) => {
+    verticalCandidates.forEach((offsetY) => {
+      const unclampedAnchorX = x + offsetX
+      const unclampedAnchorY = y + offsetY
+      const anchorX = clamp(unclampedAnchorX, marginX + labelWidth, Math.max(containerWidth - marginX - labelWidth, marginX + labelWidth))
+      const anchorY = clamp(unclampedAnchorY, marginY + labelHeight / 2, Math.max(pricePaneHeight - marginY - labelHeight / 2, marginY + labelHeight / 2))
+      const rect =
+        anchorX >= x
+          ? {
+              left: anchorX,
+              right: anchorX + labelWidth,
+              top: anchorY - labelHeight / 2,
+              bottom: anchorY + labelHeight / 2,
+            }
+          : {
+              left: anchorX - labelWidth,
+              right: anchorX,
+              top: anchorY - labelHeight / 2,
+              bottom: anchorY + labelHeight / 2,
+            }
+
+      const nearbyCandleObstacles = filterNearbyObstacles(candleObstacles, rect.left, rect.right)
+      const candleOverlap = nearbyCandleObstacles.reduce((sum, obstacle) => sum + rectOverlapArea(rect, obstacle), 0)
+      const labelOverlap = occupiedLabelRects.reduce((sum, obstacle) => sum + rectOverlapArea(rect, obstacle), 0)
+      const distanceScore = Math.abs(offsetX) * 0.8 + Math.abs(offsetY) * 0.55
+      const centerPenalty = rect.left < x && rect.right > x ? 28 : 0
+      const score = candleOverlap * 12 + labelOverlap * 18 + distanceScore + centerPenalty
+
+      if (!best || score < best.score) {
+        best = { anchorX, anchorY, rect, score }
+      }
+    })
+  })
+
+  return (
+    best ?? {
+      anchorX: x + 42,
+      anchorY: clamp(y + preferredOffsetY, marginY, Math.max(pricePaneHeight - marginY, marginY)),
+      rect: {
+        left: x + 42,
+        right: x + 42 + labelWidth,
+        top: y + preferredOffsetY - labelHeight / 2,
+        bottom: y + preferredOffsetY + labelHeight / 2,
+      },
+      score: 0,
+    }
+  )
+}
+
+function rectOverlapArea(
+  a: { left: number; right: number; top: number; bottom: number },
+  b: { left: number; right: number; top: number; bottom: number },
+) {
+  const overlapWidth = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+  const overlapHeight = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+  return overlapWidth * overlapHeight
 }
 
 function toUtcTime(time: number) {

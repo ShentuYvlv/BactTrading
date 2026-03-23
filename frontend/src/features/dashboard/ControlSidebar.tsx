@@ -36,7 +36,6 @@ const indicatorLabels: Array<{ key: keyof IndicatorState; label: string }> = [
   { key: 'showVolume', label: '成交量' },
   { key: 'showRsi', label: 'RSI' },
   { key: 'showMacd', label: 'MACD' },
-  { key: 'showTradeMarkers', label: '交易标记' },
 ]
 
 function Field({
@@ -196,6 +195,36 @@ export function ControlSidebar({
             </button>
           ))}
         </div>
+
+        <section className="space-y-3 rounded-[24px] border border-white/8 bg-[#0d1424] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">显示控制</p>
+              <p className="text-sm text-slate-200">交易标记</p>
+              <p className="text-xs text-slate-400">关闭后只看 K 线和指标走势。</p>
+            </div>
+            <button
+              aria-pressed={indicators.showTradeMarkers}
+              className={cx(
+                'relative h-8 w-14 rounded-full border transition',
+                indicators.showTradeMarkers
+                  ? 'border-emerald-400/50 bg-emerald-500/20'
+                  : 'border-line bg-panelAlt',
+              )}
+              type="button"
+              onClick={() => onIndicatorToggle('showTradeMarkers')}
+            >
+              <span
+                className={cx(
+                  'absolute top-1 h-6 w-6 rounded-full transition',
+                  indicators.showTradeMarkers
+                    ? 'left-7 bg-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)]'
+                    : 'left-1 bg-slate-300',
+                )}
+              />
+            </button>
+          </div>
+        </section>
 
         <section className="space-y-3 rounded-[24px] border border-white/8 bg-[#0d1424] p-4">
           <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">指标设置</p>
