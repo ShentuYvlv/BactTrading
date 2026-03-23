@@ -8,6 +8,7 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
+  type LogicalRange,
   type MouseEventParams,
   type UTCTimestamp,
 } from 'lightweight-charts'
@@ -182,6 +183,8 @@ export function TradingChart({
   const lastLegendKeyRef = useRef('')
   const rafRef = useRef<number | null>(null)
   const overlayRefreshRafRef = useRef<number | null>(null)
+  const visibleLogicalRangeRef = useRef<LogicalRange | null>(null)
+  const visibleLogicalRangeKeyRef = useRef<string | null>(null)
   const [legend, setLegend] = useState<LegendState | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [panelPosition, setPanelPosition] = useState(DEFAULT_PANEL_POSITION)
@@ -383,6 +386,9 @@ export function TradingChart({
     }
 
     const container = chartContainerRef.current
+    const chartViewKey = `${chartSymbol}:${timeframe}`
+    const shouldRestoreVisibleRange =
+      visibleLogicalRangeKeyRef.current === chartViewKey && visibleLogicalRangeRef.current !== null
     container.innerHTML = ''
 
     const chart = createChart(container, {
@@ -441,11 +447,11 @@ export function TradingChart({
     const candleSeries = chart.addSeries(
       CandlestickSeries,
       {
-        upColor: '#22c55e',
+        upColor: '#089981',
         downColor: '#ef4444',
-        borderUpColor: '#22c55e',
+        borderUpColor: '#089981',
         borderDownColor: '#ef4444',
-        wickUpColor: '#22c55e',
+        wickUpColor: '#089981',
         wickDownColor: '#ef4444',
         priceLineVisible: false,
       },
@@ -578,7 +584,11 @@ export function TradingChart({
       )
     }
 
-    chart.timeScale().fitContent()
+    if (shouldRestoreVisibleRange && visibleLogicalRangeRef.current) {
+      chart.timeScale().setVisibleLogicalRange(visibleLogicalRangeRef.current)
+    } else {
+      chart.timeScale().fitContent()
+    }
     applyPaneWeights(chart, chartRenderIndicators)
     syncChartMetrics(chart, container, setPricePaneHeight, setOverlayRevision)
     updateLegendState(
@@ -649,6 +659,8 @@ export function TradingChart({
     }
 
     const scheduleOverlayRefresh = () => {
+      visibleLogicalRangeRef.current = chart.timeScale().getVisibleLogicalRange()
+      visibleLogicalRangeKeyRef.current = chartViewKey
       if (overlayRefreshRafRef.current !== null) {
         return
       }
@@ -690,6 +702,8 @@ export function TradingChart({
     chartRefs.current = { chart, candleSeries }
 
     return () => {
+      visibleLogicalRangeRef.current = chart.timeScale().getVisibleLogicalRange()
+      visibleLogicalRangeKeyRef.current = chartViewKey
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
@@ -731,7 +745,7 @@ export function TradingChart({
       from: toUtcTime(selected.open_time - candleSpacing * 24),
       to: toUtcTime((selected.close_time ?? lastVisible) + candleSpacing * 24),
     })
-  }, [chartData, positions, selectedPositionId])
+  }, [positions, selectedPositionId, timeframe, chartSymbol])
 
   useEffect(() => {
     setOverlayRevision((current) => current + 1)

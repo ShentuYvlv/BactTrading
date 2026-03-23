@@ -1,5 +1,5 @@
 import type { ChartResponse } from '../../types/api'
-import { formatCompactNumber } from '../../lib/format'
+import { formatCompactNumber, formatNumber } from '../../lib/format'
 
 interface StatusOverviewProps {
   chartData?: ChartResponse
@@ -8,6 +8,11 @@ interface StatusOverviewProps {
 
 export function StatusOverview({ chartData, dataFileName }: StatusOverviewProps) {
   const summary = chartData?.summary
+  const positions = chartData?.positions ?? []
+  const closedPositions = positions.filter((position) => !position.is_open)
+  const totalProfit = positions.reduce((sum, position) => sum + position.profit, 0)
+  const winCount = closedPositions.filter((position) => position.profit > 0).length
+  const winRate = closedPositions.length > 0 ? `${((winCount / closedPositions.length) * 100).toFixed(1)}%` : '--'
   const items = [
     {
       label: '数据来源',
@@ -25,6 +30,15 @@ export function StatusOverview({ chartData, dataFileName }: StatusOverviewProps)
       label: '当前标的',
       value: chartData ? `${chartData.symbol} / ${chartData.timeframe}` : '--',
     },
+    {
+      label: '总 PnL',
+      value: chartData ? formatNumber(totalProfit, 2) : '--',
+      accent: totalProfit > 0 ? 'text-emerald-400' : totalProfit < 0 ? 'text-rose-400' : 'text-white',
+    },
+    {
+      label: '交易胜率',
+      value: winRate,
+    },
   ]
 
   return (
@@ -40,7 +54,7 @@ export function StatusOverview({ chartData, dataFileName }: StatusOverviewProps)
         {items.map((item) => (
           <div key={item.label} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 px-4 py-4">
             <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">{item.label}</p>
-            <p className="min-w-0 break-words text-sm font-medium text-white">{item.value}</p>
+            <p className={`min-w-0 break-words text-sm font-medium ${'accent' in item && item.accent ? item.accent : 'text-white'}`}>{item.value}</p>
           </div>
         ))}
       </div>

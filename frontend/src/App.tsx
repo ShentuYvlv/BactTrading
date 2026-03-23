@@ -2,7 +2,14 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
 import { loadChart, loadMoreChart, fetchConfig, fetchDataFiles, fetchSymbols } from './lib/api'
-import type { IndicatorKey, IndicatorSettings, IndicatorState, PositionRecord } from './types/api'
+import type {
+  ChartPayload,
+  ChartResponse,
+  IndicatorKey,
+  IndicatorSettings,
+  IndicatorState,
+  PositionRecord,
+} from './types/api'
 import { ControlSidebar } from './features/dashboard/ControlSidebar'
 import { StatusOverview } from './features/dashboard/StatusOverview'
 import { TradingChart } from './features/chart/TradingChart'
@@ -33,6 +40,7 @@ function App() {
   const [indicators, setIndicators] = useState(DEFAULT_INDICATORS)
   const [indicatorSettings, setIndicatorSettings] = useState(DEFAULT_INDICATOR_SETTINGS)
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null)
+  const [chartResult, setChartResult] = useState<ChartResponse | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
   const lastAppliedDateRangeFileRef = useRef<string | null>(null)
   const lastAppliedSymbolWindowRef = useRef<string | null>(null)
@@ -54,6 +62,7 @@ function App() {
   const chartMutation = useMutation({
     mutationFn: loadChart,
     onSuccess: (data) => {
+      setChartResult(data)
       setSelectedPositionId(data.positions[0]?.position_id ?? null)
     },
     onError: () => {},
@@ -62,19 +71,23 @@ function App() {
   const loadMoreMutation = useMutation({
     mutationFn: loadMoreChart,
     onSuccess: (data) => {
-      if (!data.chart || !chartMutation.data) {
+      const incomingChart = data.chart
+      if (!incomingChart) {
         return
       }
-
-      chartMutation.reset()
-      chartMutation.mutate({
-        symbol,
-        timeframe,
-        start_date: startDate,
-        end_date: endDate,
-        data_file: dataFile,
-        exchange,
-        indicator_settings: indicatorSettings,
+      setChartResult((current) => {
+        if (!current) {
+          return current
+        }
+        const mergedChart = mergeChartPayload(current.chart, incomingChart)
+        return {
+          ...current,
+          chart: mergedChart,
+          summary: {
+            ...current.summary,
+            candle_count: mergedChart.candlestick.length,
+          },
+        }
       })
     },
     onError: () => {},
@@ -179,7 +192,7 @@ function App() {
     timeframe,
   ])
 
-  const positions = chartMutation.data?.positions ?? []
+  const positions = chartResult?.positions ?? []
   const selectedPosition: PositionRecord | undefined = positions.find(
     (position) => position.position_id === selectedPositionId,
   )
@@ -203,7 +216,7 @@ function App() {
   }
 
   function handleLoadMore() {
-    const lastTimestamp = chartMutation.data?.chart.candlestick.at(-1)?.time
+    const lastTimestamp = chartResult?.chart.candlestick.at(-1)?.time
     if (!lastTimestamp) {
       return
     }
@@ -294,7 +307,7 @@ function App() {
             />
 
             <StatusOverview
-              chartData={chartMutation.data}
+              chartData={chartResult ?? undefined}
               dataFileName={dataFile ? dataFile.split('/').at(-1) ?? null : null}
             />
 
@@ -307,8 +320,8 @@ function App() {
 
           <div>
             <TradingChart
-              chartData={chartMutation.data?.chart}
-              chartSymbol={chartMutation.data?.symbol ?? symbol}
+              chartData={chartResult?.chart}
+              chartSymbol={chartResult?.symbol ?? symbol}
               positions={positions}
               indicators={indicators}
               indicatorSettings={indicatorSettings}
@@ -335,4 +348,34 @@ function shiftDate(value: string, offsetDays: number) {
   const date = new Date(`${value}T00:00:00`)
   date.setDate(date.getDate() + offsetDays)
   return date.toISOString().slice(0, 10)
+}
+
+function mergeChartPayload(current: ChartPayload, incoming: ChartPayload): ChartPayload {
+  return {
+    candlestick: appendSeriesByTime(current.candlestick, incoming.candlestick),
+    volume: appendSeriesByTime(current.volume, incoming.volume),
+    ema_series: current.ema_series.map((series, index) => ({
+      ...series,
+      data: appendSeriesByTime(series.data, incoming.ema_series[index]?.data ?? []),
+    })),
+    rsi: appendSeriesByTime(current.rsi, incoming.rsi),
+    macd: appendSeriesByTime(current.macd, incoming.macd),
+    signal: appendSeriesByTime(current.signal, incoming.signal),
+    histogram: appendSeriesByTime(current.histogram, incoming.histogram),
+  }
+}
+
+function appendSeriesByTime<T extends { time: number }>(current: T[], incoming: T[]): T[] {
+  if (incoming.length === 0) {
+    return current
+  }
+  const merged = [...current]
+  const seen = new Set(current.map((item) => item.time))
+  incoming.forEach((item) => {
+    if (!seen.has(item.time)) {
+      merged.push(item)
+      seen.add(item.time)
+    }
+  })
+  return merged
 }

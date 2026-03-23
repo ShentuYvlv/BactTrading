@@ -121,6 +121,11 @@ def fetch_ohlcv_data(
         f"macd{indicator_settings.macd.fast_period}_{indicator_settings.macd.slow_period}_{indicator_settings.macd.signal_period}"
     )
 
+    direct_cache_key = get_cache_key(symbol, timeframe, since, until, indicator_signature=indicator_signature)
+    direct_cached = get_cached_data(direct_cache_key)
+    if direct_cached is not None and not direct_cached.empty:
+        return direct_cached
+
     def _load(exchange, normalized_symbol: str) -> pd.DataFrame:
         cache_key = get_cache_key(normalized_symbol, timeframe, since, until, indicator_signature=indicator_signature)
         cached = get_cached_data(cache_key)
