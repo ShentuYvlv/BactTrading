@@ -181,6 +181,7 @@ export function TradingChart({
   const chartRefs = useRef<ChartRefs | null>(null)
   const lastLegendKeyRef = useRef('')
   const rafRef = useRef<number | null>(null)
+  const overlayRefreshRafRef = useRef<number | null>(null)
   const [legend, setLegend] = useState<LegendState | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [panelPosition, setPanelPosition] = useState(DEFAULT_PANEL_POSITION)
@@ -219,15 +220,31 @@ export function TradingChart({
     () => buildPaneOverlays(indicators, indicatorSettings),
     [indicatorSettings, indicators],
   )
+  const chartSeriesIndicators = useMemo(
+    () => ({
+      showEma: indicators.showEma,
+      showVolume: indicators.showVolume,
+      showRsi: indicators.showRsi,
+      showMacd: indicators.showMacd,
+    }),
+    [indicators.showEma, indicators.showMacd, indicators.showRsi, indicators.showVolume],
+  )
+  const chartRenderIndicators = useMemo<IndicatorState>(
+    () => ({
+      ...chartSeriesIndicators,
+      showTradeMarkers: false,
+    }),
+    [chartSeriesIndicators],
+  )
   const activeIndicatorCount = useMemo(
     () =>
       [
-        indicators.showEma,
-        indicators.showVolume,
-        indicators.showRsi,
-        indicators.showMacd,
+        chartSeriesIndicators.showEma,
+        chartSeriesIndicators.showVolume,
+        chartSeriesIndicators.showRsi,
+        chartSeriesIndicators.showMacd,
       ].filter(Boolean).length,
-    [indicators],
+    [chartSeriesIndicators],
   )
   const drawingStorageKey = useMemo(() => {
     if (!chartSymbol) {
@@ -386,7 +403,12 @@ export function TradingChart({
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: 'rgba(91, 212, 201, 0.72)', width: 1, style: 2 },
-        horzLine: { color: 'rgba(91, 212, 201, 0.3)', width: 1, style: 2 },
+        horzLine: {
+          color: 'rgba(91, 212, 201, 0.3)',
+          width: 1,
+          style: 2,
+          labelBackgroundColor: '#12b5cb',
+        },
       },
       handleScroll: {
         mouseWheel: true,
@@ -431,7 +453,7 @@ export function TradingChart({
     )
     candleSeries.setData(toCandlestickSeriesData(chartData.candlestick))
 
-    if (indicators.showEma) {
+    if (chartSeriesIndicators.showEma) {
       const emaSeriesList = Array.isArray(chartData.ema_series) ? chartData.ema_series : []
       emaSeriesList.forEach((series, index) => {
         const emaSeries = chart.addSeries(
@@ -451,7 +473,7 @@ export function TradingChart({
     }
 
     let paneIndex = 1
-    if (indicators.showVolume) {
+    if (chartSeriesIndicators.showVolume) {
       const volumeSeries = chart.addSeries(
         HistogramSeries,
         {
@@ -475,7 +497,7 @@ export function TradingChart({
       paneIndex += 1
     }
 
-    if (indicators.showRsi) {
+    if (chartSeriesIndicators.showRsi) {
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
@@ -508,7 +530,7 @@ export function TradingChart({
       paneIndex += 1
     }
 
-    if (indicators.showMacd) {
+    if (chartSeriesIndicators.showMacd) {
       const macdLine = chart.addSeries(
         LineSeries,
         {
@@ -557,7 +579,7 @@ export function TradingChart({
     }
 
     chart.timeScale().fitContent()
-    applyPaneWeights(chart, indicators)
+    applyPaneWeights(chart, chartRenderIndicators)
     syncChartMetrics(chart, container, setPricePaneHeight, setOverlayRevision)
     updateLegendState(
       setLegend,
@@ -627,8 +649,14 @@ export function TradingChart({
     }
 
     const scheduleOverlayRefresh = () => {
-      setOverlayRevision((current) => current + 1)
-      syncChartMetrics(chart, container, setPricePaneHeight)
+      if (overlayRefreshRafRef.current !== null) {
+        return
+      }
+      overlayRefreshRafRef.current = window.requestAnimationFrame(() => {
+        overlayRefreshRafRef.current = null
+        setOverlayRevision((current) => current + 1)
+        syncChartMetrics(chart, container, setPricePaneHeight)
+      })
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -647,9 +675,17 @@ export function TradingChart({
       setMenu({ x: event.clientX, y: event.clientY })
     }
     const handleWheel = () => scheduleOverlayRefresh()
+    const handlePointerDragRefresh = (event: MouseEvent) => {
+      if (event.buttons !== 0) {
+        scheduleOverlayRefresh()
+      }
+    }
+    const handlePointerUpRefresh = () => scheduleOverlayRefresh()
     container.addEventListener('dblclick', handleDoubleClick)
     container.addEventListener('contextmenu', handleContextMenu)
     container.addEventListener('wheel', handleWheel)
+    container.addEventListener('mousemove', handlePointerDragRefresh)
+    window.addEventListener('mouseup', handlePointerUpRefresh)
 
     chartRefs.current = { chart, candleSeries }
 
@@ -657,6 +693,10 @@ export function TradingChart({
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
+      }
+      if (overlayRefreshRafRef.current !== null) {
+        cancelAnimationFrame(overlayRefreshRafRef.current)
+        overlayRefreshRafRef.current = null
       }
       chart.unsubscribeCrosshairMove(handleCrosshair)
       chart.unsubscribeClick(handleClick)
@@ -666,10 +706,12 @@ export function TradingChart({
       container.removeEventListener('dblclick', handleDoubleClick)
       container.removeEventListener('contextmenu', handleContextMenu)
       container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('mousemove', handlePointerDragRefresh)
+      window.removeEventListener('mouseup', handlePointerUpRefresh)
       chart.remove()
       chartRefs.current = null
     }
-  }, [chartData, dataIndexes, indicators, markerPositionIndex, onSelectPosition, positions])
+  }, [chartData, chartRenderIndicators, chartSeriesIndicators, dataIndexes, markerPositionIndex, onSelectPosition, positions])
 
   useEffect(() => {
     if (!chartRefs.current || !chartData || !selectedPositionId) {
